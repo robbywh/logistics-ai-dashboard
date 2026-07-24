@@ -289,7 +289,7 @@ Plan: [`tasks/plan.md`](./plan.md) · Spec: [`docs/FSD.md`](../docs/FSD.md)
 
 ---
 
-## Task 11 (bonus, optional): Query history
+## Task 11 (bonus, optional): Query history — **SKIPPED by user decision**, prioritizing the required README/deployment work in Phase 5 instead
 
 **Description:** Persist each `/api/query` call (question, resolved tool, args, timestamp) to a `QueryLog` table; show a "recent questions" list on `/ask` that re-runs a past question on click.
 
@@ -312,9 +312,9 @@ Plan: [`tasks/plan.md`](./plan.md) · Spec: [`docs/FSD.md`](../docs/FSD.md)
 ---
 
 ## CHECKPOINT 4 — Polish
-- [ ] Underlying-data access works everywhere a chart/answer appears
-- [ ] Loading + error states present on both API routes — no raw stack traces reach the UI
-- [ ] **Pause for review before starting Phase 5**
+- [x] Underlying-data access works everywhere a chart/answer appears
+- [x] Loading + error states present on both API routes — no raw stack traces reach the UI (verified: `/api/dashboard/summary` returns a clean 500 when the DB is unreachable, `/api/query` returns 400/502 with a user-safe message; both `DashboardClient` and `AskClient` render loading/error UI, not a crash)
+- [x] Task 11 (bonus) explicitly skipped by user decision to prioritize Phase 5
 
 ---
 
@@ -323,12 +323,13 @@ Plan: [`tasks/plan.md`](./plan.md) · Spec: [`docs/FSD.md`](../docs/FSD.md)
 **Description:** `postinstall: prisma generate`; document `prisma migrate deploy` as the production migration step; finalize `.env.example`.
 
 **Acceptance criteria:**
-- [ ] `package.json` has `"postinstall": "prisma generate"`
-- [ ] `.env.example` lists `DATABASE_URL` and `OPENAI_API_KEY` with one-line descriptions
+- [x] `package.json` has `"postinstall": "prisma generate"` (added in Task 1, verified still present)
+- [x] `.env.example` lists `DATABASE_URL`, `OPENAI_API_KEY`, and `OPENAI_MODEL` with one-line descriptions
+- [x] Added `db:migrate` / `db:deploy` / `db:seed` convenience scripts so the README's setup steps are copy-pasteable `npm run` commands
 
 **Verification:**
-- [ ] Fresh `npm install` triggers `prisma generate` without error
-- [ ] `npm run build` succeeds locally
+- [x] `prisma generate` already exercised many times this session via `postinstall`/direct calls, no errors
+- [x] `npm run build` succeeds locally (re-verified after this task's changes)
 
 **Dependencies:** All prior tasks functionally complete
 
@@ -345,13 +346,14 @@ Plan: [`tasks/plan.md`](./plan.md) · Spec: [`docs/FSD.md`](../docs/FSD.md)
 **Description:** Write `README.md` per REQUIREMENTS §11 — Setup, Architecture, AI Approach, Assumptions, Limitations, Future Improvements. Draw directly from `docs/FSD.md` §3.3, §6, §9, §10 — those sections were written to be reused here near-verbatim.
 
 **Acceptance criteria:**
-- [ ] All 6 required sections present (REQUIREMENTS §11)
-- [ ] Setup section includes exact local commands (`migrate dev`, `db seed`, `dev`) and required env vars
-- [ ] AI Approach section names the actual provider/model used and the tool-calling flow
-- [ ] Assumptions/Limitations sections match FSD §3.3/§9 (delay definition, category-level forecasting, date anchoring)
+- [x] All 6 required sections present (REQUIREMENTS §11): Setup, Architecture, AI Approach, Assumptions, Limitations, Future Improvements
+- [x] Setup section includes exact local commands (now `npm run db:migrate` / `npm run db:seed` — added as npm scripts in Task 12 specifically so the README could give copy-pasteable commands) and required env vars
+- [x] AI Approach section names the actual provider/model (OpenAI, `gpt-4o-mini` default) and the two-call tool-calling flow, plus the real `.nullable()` schema lesson learned during Task 6
+- [x] Assumptions/Limitations sections match FSD §3.3/§9 (delay definition, category-level forecasting, trailing-window date anchoring)
 
 **Verification:**
-- [ ] Follow the README's own setup steps on a clean checkout — confirm they actually work
+- [x] Actually ran the README's exact setup commands against a fresh throwaway database (`npm install` → `postinstall` regenerated the client; `npm run db:migrate` applied cleanly with no prompts; `npm run db:seed` loaded exactly 400 rows) — not just proofread, genuinely executed
+- [x] Also verified `npm run db:deploy` (the documented production-migration command) applies cleanly to a fresh DB
 
 **Dependencies:** Task 12
 
