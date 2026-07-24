@@ -1,12 +1,14 @@
 "use client";
 
+import { memo } from "react";
+
 type Props = {
   from: string;
   to: string;
   onChange: (range: { from: string; to: string }) => void;
 };
 
-export function DateRangeControl({ from, to, onChange }: Props) {
+export const DateRangeControl = memo(function DateRangeControl({ from, to, onChange }: Props) {
   return (
     <div className="flex flex-wrap items-end gap-3">
       <label className="flex flex-col text-xs text-zinc-500 dark:text-zinc-400">
@@ -29,4 +31,4 @@ export function DateRangeControl({ from, to, onChange }: Props) {
       </label>
     </div>
   );
-}
+});

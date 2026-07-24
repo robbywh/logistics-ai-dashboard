@@ -1,5 +1,6 @@
 "use client";
 
+import { memo, useMemo } from "react";
 import {
   Bar,
   BarChart,
@@ -10,17 +11,30 @@ import {
   YAxis,
 } from "recharts";
 import { ChartCard } from "./ChartCard";
+import { type Column } from "./DataTable";
 import { UnderlyingDataToggle } from "./UnderlyingDataToggle";
 
 type Props = {
   data: { carrier: string; total: number; delayRate: number }[];
 };
 
-export function CarrierBreakdownChart({ data }: Props) {
-  const chartData = data.map((d) => ({
-    ...d,
-    delayRatePct: Math.round(d.delayRate * 1000) / 10,
-  }));
+type ChartRow = { carrier: string; total: number; delayRatePct: number };
+
+const COLUMNS: Column<ChartRow>[] = [
+  { key: "carrier", label: "Carrier" },
+  { key: "total", label: "Completed orders" },
+  { key: "delayRatePct", label: "Delay rate %" },
+];
+
+export const CarrierBreakdownChart = memo(function CarrierBreakdownChart({ data }: Props) {
+  const chartData = useMemo(
+    () =>
+      data.map((d) => ({
+        ...d,
+        delayRatePct: Math.round(d.delayRate * 1000) / 10,
+      })),
+    [data],
+  );
 
   return (
     <ChartCard title="Carrier delay rate">
@@ -39,14 +53,7 @@ export function CarrierBreakdownChart({ data }: Props) {
           />
         </BarChart>
       </ResponsiveContainer>
-      <UnderlyingDataToggle
-        rows={chartData}
-        columns={[
-          { key: "carrier", label: "Carrier" },
-          { key: "total", label: "Completed orders" },
-          { key: "delayRatePct", label: "Delay rate %" },
-        ]}
-      />
+      <UnderlyingDataToggle rows={chartData} columns={COLUMNS} />
     </ChartCard>
   );
-}
+});

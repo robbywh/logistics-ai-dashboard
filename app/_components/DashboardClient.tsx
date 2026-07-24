@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { CarrierBreakdownChart } from "./CarrierBreakdownChart";
 import { DateRangeControl } from "./DateRangeControl";
@@ -45,16 +45,22 @@ export function DashboardClient() {
   } = useQuery({
     queryKey: ["dashboard-summary", selectedRange?.from, selectedRange?.to],
     queryFn: () => fetchSummary(selectedRange),
+    placeholderData: keepPreviousData,
   });
+
+  // Prefer what the user just picked over the (possibly stale, still-fetching)
+  // server response, so the inputs reflect the selection immediately instead
+  // of waiting on a round-trip.
+  const displayedRange = selectedRange ?? summary?.range;
 
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-2xl font-semibold">Dashboard</h1>
-        {summary && (
+        {displayedRange && (
           <DateRangeControl
-            from={summary.range.from}
-            to={summary.range.to}
+            from={displayedRange.from}
+            to={displayedRange.to}
             onChange={setSelectedRange}
           />
         )}

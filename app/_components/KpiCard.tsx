@@ -1,9 +1,11 @@
+import { memo } from "react";
+
 type KpiCardProps = {
   label: string;
   value: string;
 };
 
-export function KpiCard({ label, value }: KpiCardProps) {
+export const KpiCard = memo(function KpiCard({ label, value }: KpiCardProps) {
   // Stable hook for E2E assertions (tests/e2e/dashboard.spec.ts) — text
   // content alone isn't a reliable selector since KPI values are numbers
   // that can coincidentally match other numbers on the page.
@@ -22,4 +24,4 @@ export function KpiCard({ label, value }: KpiCardProps) {
       </div>
     </div>
   );
-}
+});

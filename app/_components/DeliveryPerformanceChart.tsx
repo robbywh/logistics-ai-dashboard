@@ -1,7 +1,9 @@
 "use client";
 
+import { memo } from "react";
 import { Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { ChartCard } from "./ChartCard";
+import { type Column } from "./DataTable";
 import { UnderlyingDataToggle } from "./UnderlyingDataToggle";
 
 type Props = {
@@ -11,7 +13,15 @@ type Props = {
 
 const COLORS = ["#22c55e", "#ef4444"];
 
-export function DeliveryPerformanceChart({ onTime, late }: Props) {
+const COLUMNS: Column<{ name: string; value: number }>[] = [
+  { key: "name", label: "Status" },
+  { key: "value", label: "Orders" },
+];
+
+export const DeliveryPerformanceChart = memo(function DeliveryPerformanceChart({
+  onTime,
+  late,
+}: Props) {
   const data = [
     { name: "On-time", value: onTime },
     { name: "Delayed / exception", value: late },
@@ -38,13 +48,7 @@ export function DeliveryPerformanceChart({ onTime, late }: Props) {
           <Tooltip />
         </PieChart>
       </ResponsiveContainer>
-      <UnderlyingDataToggle
-        rows={data}
-        columns={[
-          { key: "name", label: "Status" },
-          { key: "value", label: "Orders" },
-        ]}
-      />
+      <UnderlyingDataToggle rows={data} columns={COLUMNS} />
     </ChartCard>
   );
-}
+});

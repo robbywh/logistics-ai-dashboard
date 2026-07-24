@@ -18,11 +18,11 @@ An AI-powered analytics dashboard for a logistics client: a traditional KPI/char
 cp .env.example .env
 ```
 
-| Variable | Required | Notes |
-|---|---|---|
-| `DATABASE_URL` | Yes | Prisma Postgres (Accelerate) connection string, `prisma+postgres://...`. From the Prisma Console. |
-| `OPENAI_API_KEY` | Yes (for Ask AI) | The dashboard (`/`) works without it — only `/api/query` depends on it. |
-| `OPENAI_MODEL` | No | Defaults to `gpt-4o-mini`. |
+| Variable         | Required         | Notes                                                                                             |
+| ---------------- | ---------------- | ------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`   | Yes              | Prisma Postgres (Accelerate) connection string, `prisma+postgres://...`. From the Prisma Console. |
+| `OPENAI_API_KEY` | Yes (for Ask AI) | The dashboard (`/`) works without it — only `/api/query` depends on it.                           |
+| `OPENAI_MODEL`   | No               | Defaults to `gpt-4o-mini`.                                                                        |
 
 ### Local setup
 
@@ -94,13 +94,13 @@ Next.js Route Handlers
 
 A pyramid — most coverage at the bottom, fewest slower tests at the top. Full rationale in [`docs/FSD.md` §11](docs/FSD.md#11-testing-strategy).
 
-| Layer | Tool | Where | Count | Covers |
-|---|---|---|---|---|
-| Unit | Vitest | `lib/*.test.ts` | 48 | Pure functions — aggregation, query DSL, date-anchor, forecasting, chart selection. No DB, no network. 100% coverage. |
-| Integration | Vitest | `tests/integration/*.test.ts` | 9 | Real route handlers against the real database. Only the OpenAI call is mocked — the computation after it is real. |
-| E2E | Playwright | `tests/e2e/*.test.ts` | 10 | Real browser + server. Dashboard specs hit the real DB; Ask AI specs mock `/api/query` at the network layer and verify rendering, including lazy-load and infinite-scroll pagination. |
+| Layer       | Tool       | Where                         | Count | Covers                                                                                                                                                                                |
+| ----------- | ---------- | ----------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Unit        | Vitest     | `lib/*.test.ts`               | 48    | Pure functions — aggregation, query DSL, date-anchor, forecasting, chart selection. No DB, no network. 100% coverage.                                                                 |
+| Integration | Vitest     | `tests/integration/*.test.ts` | 9     | Real route handlers against the real database. Only the OpenAI call is mocked — the computation after it is real.                                                                     |
+| E2E         | Playwright | `tests/e2e/*.test.ts`         | 10    | Real browser + server. Dashboard specs hit the real DB; Ask AI specs mock `/api/query` at the network layer and verify rendering, including lazy-load and infinite-scroll pagination. |
 
-AI is never called for real in any automated test — slow, costs money, non-deterministic. Whether the model *itself* picks the right tool for a question was verified manually during development, not by CI — a deliberate scope cut.
+AI is never called for real in any automated test — slow, costs money, non-deterministic. Whether the model _itself_ picks the right tool for a question was verified manually during development, not by CI — a deliberate scope cut.
 
 **⚠️ Integration tests write to whatever `DATABASE_URL` points at** (cleaned up in `afterEach`). Use a local/dev database, never production.
 
@@ -110,11 +110,11 @@ AI is never called for real in any automated test — slow, costs money, non-det
 
 **Flow** (`lib/ai/orchestrator.ts`): a routing call with `toolChoice: "required"` picks exactly one of `queryAnalytics` / `forecastDemand` / `clarify` — the model can never skip straight to a freeform answer. The route then runs the matching plain-TypeScript function (no AI-generated SQL or code). A second, short call restates only the numbers in the tool's result.
 
-**Tool selection** is the model's job, but the *shape* it can express is a closed, zod-validated schema (metric enum, groupBy, filters) — not open-ended text or SQL.
+**Tool selection** is the model's job, but the _shape_ it can express is a closed, zod-validated schema (metric enum, groupBy, filters) — not open-ended text or SQL.
 
 **A lesson from building this:** OpenAI's tool-calling forces every schema property into the model's output regardless of Zod's `.optional()` — this caused the model to fabricate filter values (a random carrier, a wrong date) for fields the question never mentioned. Fixing it required making every optional field `.nullable()` too, giving the model a schema-legitimate way to say "not applicable."
 
-**Relative dates** ("last month") resolve server-side against the *dataset's own* latest order date, not the real clock — the dataset is a static 2025 snapshot.
+**Relative dates** ("last month") resolve server-side against the _dataset's own_ latest order date, not the real clock — the dataset is a static 2025 snapshot.
 
 ## Assumptions
 
@@ -129,7 +129,7 @@ AI is never called for real in any automated test — slow, costs money, non-det
 - Forecasting is category-level only.
 - No multi-turn conversation memory in Ask AI.
 - Chart types are limited to line/bar/stat by design.
-- When a user names a specific SKU, the model *usually* but not always states in prose that it substituted the category level (the query plan always shows it regardless).
+- When a user names a specific SKU, the model _usually_ but not always states in prose that it substituted the category level (the query plan always shows it regardless).
 - AI responses take ~3–12 seconds (two sequential model calls). No streaming yet.
 - Underlying-data tables show aggregated rows, not a raw drill-down into all 400 orders.
 
@@ -139,6 +139,5 @@ AI is never called for real in any automated test — slow, costs money, non-det
 - Multi-turn chat context for follow-up questions.
 - Stream the routing/answer generation instead of one long wait.
 - Move aggregation to DB-side `groupBy` if the dataset grows significantly.
-- Cache-tag-based Accelerate invalidation wired into `db:seed`.
 - A dedicated test database for integration tests.
 - CI (GitHub Actions) to run all three test layers on push/PR.

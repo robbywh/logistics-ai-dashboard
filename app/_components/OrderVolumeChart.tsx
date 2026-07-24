@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import {
   CartesianGrid,
   Line,
@@ -10,13 +11,19 @@ import {
   YAxis,
 } from "recharts";
 import { ChartCard } from "./ChartCard";
+import { type Column } from "./DataTable";
 import { UnderlyingDataToggle } from "./UnderlyingDataToggle";
 
 type Props = {
   data: { month: string; count: number }[];
 };
 
-export function OrderVolumeChart({ data }: Props) {
+const COLUMNS: Column<{ month: string; count: number }>[] = [
+  { key: "month", label: "Month" },
+  { key: "count", label: "Orders" },
+];
+
+export const OrderVolumeChart = memo(function OrderVolumeChart({ data }: Props) {
   return (
     <ChartCard title="Order volume over time">
       <ResponsiveContainer width="100%" height={260}>
@@ -36,13 +43,7 @@ export function OrderVolumeChart({ data }: Props) {
           />
         </LineChart>
       </ResponsiveContainer>
-      <UnderlyingDataToggle
-        rows={data}
-        columns={[
-          { key: "month", label: "Month" },
-          { key: "count", label: "Orders" },
-        ]}
-      />
+      <UnderlyingDataToggle rows={data} columns={COLUMNS} />
     </ChartCard>
   );
-}
+});
