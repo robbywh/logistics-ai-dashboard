@@ -9,12 +9,10 @@ An AI-powered analytics dashboard for a logistics client: a traditional KPI/char
 ### Requirements
 
 - Node.js 20.19+
-- A Prisma Postgres database (this project already has one provisioned via Prisma Compute, connected to this repo's GitHub `main` branch)
+- A Prisma Postgres database (already provisioned via Prisma Compute, connected to this repo's GitHub `main` branch)
 - An OpenAI API key
 
 ### Environment variables
-
-Copy `.env.example` to `.env` and fill in real values:
 
 ```bash
 cp .env.example .env
@@ -22,7 +20,7 @@ cp .env.example .env
 
 | Variable | Required | Notes |
 |---|---|---|
-| `DATABASE_URL` | Yes | Prisma Postgres (Accelerate) connection string, `prisma+postgres://...`. Copy it from the Prisma Console (Database → Connection strings). |
+| `DATABASE_URL` | Yes | Prisma Postgres (Accelerate) connection string, `prisma+postgres://...`. From the Prisma Console. |
 | `OPENAI_API_KEY` | Yes (for Ask AI) | The dashboard (`/`) works without it — only `/api/query` depends on it. |
 | `OPENAI_MODEL` | No | Defaults to `gpt-4o-mini`. |
 
@@ -35,137 +33,113 @@ npm run db:seed        # loads docs/data/mock_logistics_data.csv (400 orders)
 npm run dev
 ```
 
-Then open `http://localhost:3000`. `/` is the descriptive dashboard (no AI dependency); `/ask` is the natural-language interface.
+`/` is the descriptive dashboard (no AI dependency); `/ask` is the natural-language interface.
 
 ### Tests
-
-Three layers (see [Testing](#testing) below for the full breakdown):
 
 ```bash
 npm test                    # unit — 48 tests, no DB required
 npm run test:coverage       # unit tests + coverage report
-npm run test:integration    # 8 tests — real DB required, see the Testing section's warning
-npm run test:e2e            # 8 tests — Playwright; run `npx playwright install chromium` once first
+npm run test:integration    # 8 tests — real DB required (see Testing below)
+npm run test:e2e            # 8 tests — Playwright; `npx playwright install chromium` once first
 ```
 
 ### Deployment
 
-Deployed on [Prisma Compute](https://www.prisma.io/compute), which also hosts the Prisma Postgres database — wired to this repo's GitHub `main` branch, so pushes auto-deploy. `next.config.ts` sets `output: "standalone"`, which Compute requires for Next.js apps. Two things are **not** automatic and need to be run once against the production database:
+Deployed on [Prisma Compute](https://www.prisma.io/compute) (also hosts the database), wired to `main` — pushes auto-deploy. `next.config.ts` sets `output: "standalone"`, which Compute requires. Migrations are **not** run on every build (a bigger risk than the convenience is worth against a shared prod database); run these once manually against prod:
 
 ```bash
-npm run db:deploy   # npx prisma migrate deploy — applies prisma/migrations to prod
-npm run db:seed      # loads the CSV into prod (needs DATABASE_URL pointed at prod)
+npm run db:deploy   # applies prisma/migrations to prod
+npm run db:seed      # loads the CSV into prod
 ```
 
-Migrations are deliberately **not** run on every build (no `prisma migrate deploy` in the build command) — for a small project like this, auto-running migrations on preview deploys against a shared production database is a bigger risk than the convenience is worth. Also set `OPENAI_API_KEY` (and optionally `OPENAI_MODEL`) as environment variables on the Prisma Compute app.
-
-No authentication — the dataset is read-only and the assignment's deployment notes treat that as acceptable for a demo.
+No authentication — the dataset is read-only, which the assignment's deployment notes treat as acceptable for a demo.
 
 ## Architecture
 
 ```
 Browser
-  │
-  ├─ / (Dashboard)         Client Component → React Query → GET /api/dashboard/summary
-  ├─ /ask (Ask AI)         Client Component → React Query → POST /api/query, GET /api/query/history
-  │
+  ├─ / (Dashboard)   Client Component → React Query → GET /api/dashboard/summary
+  ├─ /ask (Ask AI)   Client Component → React Query → POST /api/query, GET /api/query/history
   ▼
-Next.js App Router (Route Handlers)
-  │
-  ├─ /api/dashboard/summary  ── deterministic Prisma fetch + pure aggregation (no AI)
+Next.js Route Handlers
+  ├─ /api/dashboard/summary  ── deterministic Prisma fetch + aggregation (no AI)
   ├─ /api/query/history      ── reads recent QueryLog rows (no AI)
-  │
   └─ /api/query
-        │
         ▼
      AI Orchestrator (Vercel AI SDK + OpenAI)
-        │  Call 1: model must pick exactly one tool (toolChoice: "required")
-        │           → queryAnalytics | forecastDemand | clarify
-        │  (plain TypeScript executes the tool — no AI, no SQL from the model)
-        │  Call 2: model restates ONLY the numbers in the tool's result
+        Call 1: model picks exactly one tool (toolChoice: "required")
+                → queryAnalytics | forecastDemand | clarify
+        (plain TypeScript executes the tool — no AI, no SQL from the model)
+        Call 2: model restates ONLY the numbers in the tool's result
         ▼
-     { answer, explanation, chartType, data } → persisted to QueryLog → UI (chart + explainability panel)
-                                                      ▼
-                                            Prisma Postgres
-                                              ├─ Order (read-only, 400 seeded rows, Accelerate-cached reads)
-                                              └─ QueryLog (write-once per question, powers recent-questions list)
+     answer + chart + explainability → persisted to QueryLog → UI
+                ▼
+     Prisma Postgres: Order (read-only) · QueryLog (write-once per question)
 ```
 
-**Key design decisions:**
+**Key decisions:**
 
-- **One denormalized `Order` table**, no lookup tables. Matches the source CSV 1:1 — simplicity over normalization, appropriate for a 400-row dataset and a 6–10 hour time-box.
-- **Aggregation happens in TypeScript over an in-memory array, not DB-side `groupBy`.** `getAllOrders()` fetches all 400 rows once (`lib/orders.ts`); every metric — dashboard KPIs, the query DSL, and forecasting — is a pure function over that array (`lib/dashboard.ts`, `lib/query-dsl.ts`, `lib/forecast.ts`). This keeps every computation unit-testable against the real seed data with **no database connection required**, at a scale (400 rows) where the performance tradeoff is irrelevant. Would move to DB-side aggregation if the dataset grew significantly.
-- **The AI never touches SQL or the database.** It emits a small, zod-validated argument object; a plain TypeScript function executes it via array filtering/grouping. Chart type (`line`/`bar`/`stat`) is chosen by a deterministic pure function of the query shape, never by the model. This is what makes "AI interpretation," "data computation," and "business logic" independently testable, three separate layers rather than one AI call that does everything.
-- **The dashboard has zero AI dependency.** `GET /api/dashboard/summary` never calls OpenAI — it works even if the AI provider is down or the key is missing.
-- **Prisma 7 + Accelerate.** This project pins `prisma@7`, which removed the bundled query engine binary in favor of either a driver adapter or Prisma Accelerate. Since the database is Prisma Postgres (accessed through Accelerate's connection pool), the client is constructed with `accelerateUrl` (`@prisma/extension-accelerate`) rather than a driver adapter — see `lib/prisma.ts`. Connection config lives in `prisma.config.ts`, not the schema's `datasource` block; the generated client (`generated/prisma/`) is gitignored and regenerated via `postinstall`.
-- **Accelerate query caching, scoped to the one read path that's safe to cache.** `getAllOrders()` (`lib/orders.ts`) is the single `findMany()` behind every dashboard request and every AI query — same no-arg call every time, against a dataset that only changes via a manual `db:seed` re-run. The client is wrapped with `withAccelerate()` and that query sets `cacheStrategy: { ttl: 300, swr: 600 }`, so repeat requests hit Accelerate's edge cache instead of the database. One cache entry covers all date ranges, since filtering happens in-memory after the fetch. `QueryLog` reads deliberately do **not** use `cacheStrategy` — that table changes on every question, and an Accelerate cache would show a stale "recent questions" list until the TTL expired (a real bug I hit and fixed while building this: the history list didn't show the question I'd just asked). After a production `Order` reseed, call `prisma.$accelerate.invalidateAll()` (or just wait out the `ttl`) to drop the stale entry.
-- **React Query for client-side state.** Both pages replaced manual `useEffect`/`useState` fetch plumbing with `@tanstack/react-query`. The dashboard keys its query on `["dashboard-summary", from, to]`, so re-selecting a previously-viewed date range in the same session is a cache hit. Ask AI keys history on `["query-history"]` and invalidates it in the `POST /api/query` mutation's `onSuccess`, so a newly-asked question shows up in the list immediately. This is a session-local complement to the Accelerate cache above, not a replacement — it doesn't share state across users/tabs.
-- **Query history persisted, not computed.** `QueryLog` (new Prisma model) stores `{ question, toolUsed, response }` per `/api/query` call, written by the route handler after the orchestrator returns — not inside the orchestrator, keeping "call the AI" and "log the result" as separate steps. `GET /api/query/history` returns the last 10. Clicking an entry in the UI re-submits that question through the normal `POST /api/query` mutation — it's a shortcut for "ask this again," not a replay of the stored answer, so it always reflects a real, current AI response rather than a cached one. Only the *read* endpoints (`/api/dashboard/summary`, `/api/query/history`) are cached (Accelerate server-side, React Query client-side) — the AI call itself is never served from a cache. The list itself renders *below* the answer, not between the input and the answer, and is capped at `max-h-56 overflow-y-auto` — otherwise a growing history list pushes the thing the user just asked for further down the page on every visit, which is exactly what happened before this was fixed.
+- **One denormalized `Order` table**, no lookup tables — matches the source CSV 1:1, appropriate for 400 rows and a 6–10 hour time-box.
+- **Aggregation happens in TypeScript over an in-memory array, not DB-side `groupBy`.** `getAllOrders()` fetches all 400 rows once; every metric (`lib/dashboard.ts`, `lib/query-dsl.ts`, `lib/forecast.ts`) is a pure function over that array — unit-testable with no DB connection. Would move to DB-side aggregation if the dataset grew significantly.
+- **The AI never touches SQL or the database.** It emits a zod-validated argument object; plain TypeScript executes it via array filtering. Chart type is a deterministic function of the query shape, never the model's choice. This keeps "AI interpretation," "computation," and "business logic" independently testable.
+- **The dashboard has zero AI dependency** — `GET /api/dashboard/summary` never calls OpenAI.
+- **Prisma 7 + Accelerate.** `prisma@7` removed the bundled query engine binary; the client connects via `accelerateUrl` (`@prisma/extension-accelerate`, `lib/prisma.ts`) since the database is Prisma Postgres. Connection config lives in `prisma.config.ts`, not the schema.
+- **Accelerate caches the one read path that's safe to cache.** `getAllOrders()` sets `cacheStrategy: { ttl: 300, swr: 600 }` — the dataset only changes via manual reseed. `QueryLog` reads deliberately aren't cached (that table changes on every question; caching it would show a stale recent-questions list).
+- **React Query for client-side state**, replacing manual `useEffect`/`useState` fetch plumbing. Dashboard keys on `["dashboard-summary", from, to]`; Ask AI's history list (`["query-history"]`) is invalidated after every successful mutation.
+- **Query history is persisted, not computed** — `QueryLog` stores `{ question, toolUsed, response }`, written by the route handler after the orchestrator returns. Clicking a history entry re-submits the question through the normal mutation (a real, fresh AI call — not a replay). The list renders below the answer and is height-capped (`max-h-56 overflow-y-auto`), so it never pushes the answer down as history grows.
 
 ## Testing
 
-A pyramid: most coverage at the bottom (fast, free, deterministic), fewer tests at the top (slower, needs more infrastructure). Full rationale in [`docs/FSD.md` §11](docs/FSD.md#11-testing-strategy).
+A pyramid — most coverage at the bottom, fewest slower tests at the top. Full rationale in [`docs/FSD.md` §11](docs/FSD.md#11-testing-strategy).
 
 | Layer | Tool | Where | Count | Covers |
 |---|---|---|---|---|
-| Unit | Vitest | `lib/*.test.ts` | 48 | Pure functions only — aggregation, query DSL, date-anchor, forecasting, chart-type selection. No DB, no network. 100% coverage over this scope. |
-| Integration | Vitest | `tests/integration/*.test.ts` | 8 | Real route handlers called directly against the real database. Only the OpenAI call (`generateText` from the `ai` SDK) is mocked — the tool-selection *computation* that runs after it is real. |
-| E2E | Playwright | `tests/e2e/*.spec.ts` | 8 | Real browser, real server. Dashboard specs hit the real DB (no AI dependency, so nothing to mock). Ask AI specs mock `/api/query` at the browser network layer and verify rendering — including that a long recent-questions list stays capped/scrollable instead of pushing the answer down. |
+| Unit | Vitest | `lib/*.test.ts` | 48 | Pure functions — aggregation, query DSL, date-anchor, forecasting, chart selection. No DB, no network. 100% coverage. |
+| Integration | Vitest | `tests/integration/*.test.ts` | 8 | Real route handlers against the real database. Only the OpenAI call is mocked — the computation after it is real. |
+| E2E | Playwright | `tests/e2e/*.test.ts` | 8 | Real browser + server. Dashboard specs hit the real DB; Ask AI specs mock `/api/query` at the network layer and verify rendering. |
 
-```bash
-npm test                    # unit — fast, no DB required
-npm run test:coverage       # unit tests + v8 coverage report (text + html + lcov in coverage/)
-npm run test:integration    # real DB required — see warning below
-npm run test:e2e            # Playwright; `npx playwright install chromium` once first
-```
+AI is never called for real in any automated test — slow, costs money, non-deterministic. Whether the model *itself* picks the right tool for a question was verified manually during development, not by CI — a deliberate scope cut.
 
-**AI is never called for real in any automated test** — it's slow, costs money per run, and is non-deterministic (the model could pick a different tool between runs). Integration tests mock only `generateText`, feeding it a fixed tool-call shape and asserting the real, deterministic computation downstream is correct — the actual thing the assignment's architecture principle (§9: "AI must NOT generate answers without computation") requires to be trustworthy. Whether the model *itself* reliably picks the right tool for a given question was verified manually during development against the real API, not by an automated test — a deliberate scope cut, not an oversight.
-
-**⚠️ Integration tests write to whatever database `DATABASE_URL` points at** (a `QueryLog` row per test, cleaned up in `afterEach`). Point it at a local/dev database — never at the production database backing the live `/ask` page.
-
-**Coverage is scoped to `lib/`** (unit-testable pure functions) minus the DB/AI-touching files that the integration layer covers instead (`lib/ai/**`, `lib/prisma.ts`, `lib/orders.ts`, `lib/query-log.ts`) — currently **100%** statements/branches/functions/lines. No enforced threshold; it's a number to watch, not a gate. Getting there surfaced two genuinely dead branches (`dashboard.ts`'s and `forecast.ts`'s defensive zero-division guards, both structurally unreachable given their callers' invariants) — removed rather than tested around, since a contrived test for unreachable code proves nothing. Full before/after breakdown in [`docs/FSD.md` §11](docs/FSD.md#11-testing-strategy).
+**⚠️ Integration tests write to whatever `DATABASE_URL` points at** (cleaned up in `afterEach`). Use a local/dev database, never production.
 
 ## AI Approach
 
-**Provider:** OpenAI via the [Vercel AI SDK](https://ai-sdk.dev) (`ai` + `@ai-sdk/openai`), model configurable via `OPENAI_MODEL` (default `gpt-4o-mini`).
+**Provider:** OpenAI via the [Vercel AI SDK](https://ai-sdk.dev), model configurable via `OPENAI_MODEL` (default `gpt-4o-mini`).
 
-**Flow** (`lib/ai/orchestrator.ts`):
+**Flow** (`lib/ai/orchestrator.ts`): a routing call with `toolChoice: "required"` picks exactly one of `queryAnalytics` / `forecastDemand` / `clarify` — the model can never skip straight to a freeform answer. The route then runs the matching plain-TypeScript function (no AI-generated SQL or code). A second, short call restates only the numbers in the tool's result.
 
-1. **Routing call** — `generateText` with three tools (`queryAnalytics`, `forecastDemand`, `clarify`) and `toolChoice: "required"`. The model must call exactly one — it can never skip straight to a freeform answer. `clarify` is itself a tool, used for off-topic or too-ambiguous questions, so "I can't answer that" is a legitimate, schema-sanctioned outcome rather than the model breaking the "must call a tool" rule.
-2. **Deterministic execution** — the route reads which tool was called and its validated arguments, then runs the matching plain-TypeScript function (`executeQueryAnalytics` or `forecastCategory`). No AI-generated SQL or code ever executes.
-3. **Grounded answer call** — a second, short `generateText` call receives the tool's actual computed result (as JSON) and is instructed to restate *only* the numbers present in it, never introduce new ones.
+**Tool selection** is the model's job, but the *shape* it can express is a closed, zod-validated schema (metric enum, groupBy, filters) — not open-ended text or SQL.
 
-**Tool selection logic** is entirely the model's job (that's the point of tool-calling), but the *shape* of what it can express is a closed, zod-validated schema — a metric enum, an optional groupBy dimension, and a small set of filter fields — not open-ended text or SQL. This is the "structured query generation, not raw AI SQL" principle from the assignment's architecture guidelines.
+**A lesson from building this:** OpenAI's tool-calling forces every schema property into the model's output regardless of Zod's `.optional()` — this caused the model to fabricate filter values (a random carrier, a wrong date) for fields the question never mentioned. Fixing it required making every optional field `.nullable()` too, giving the model a schema-legitimate way to say "not applicable."
 
-**A concrete lesson from building this:** OpenAI's tool-calling forces every schema property to be present in the model's output, regardless of Zod's `.optional()`. Early on this caused the model to fabricate plausible-but-wrong filter values (a random carrier, a random region, even a wrong-decade date) for fields the user's question never mentioned — no amount of prompt engineering fixed it. The actual fix was making every optional field `.nullable()` too, so the model has a schema-legitimate way to say "not applicable" instead of inventing a value. Worth knowing if you extend the tool schemas.
-
-**Relative dates** ("last month", "last 3 months") are resolved server-side against the *dataset's own* latest order date (`lib/date-anchor.ts`), not the server's real clock — the dataset is a static 2025 snapshot, so anchoring to real "today" would silently return empty results for every relative-date question.
+**Relative dates** ("last month") resolve server-side against the *dataset's own* latest order date, not the real clock — the dataset is a static 2025 snapshot.
 
 ## Assumptions
 
-- **No SLA/expected-delivery-date column exists in the source data**, so `status` is treated as the authoritative delay signal: `DELIVERED` = on-time, `DELAYED`/`EXCEPTION` = late, `IN_TRANSIT`/`CANCELED` are excluded from on-time-rate and avg-delivery-time calculations (no completed outcome yet).
-- **Forecasting runs at the product-category level, not per-SKU.** 355 of the CSV's 400 rows have a distinct SKU — nowhere near enough history to fit a trend per SKU. The 8 product categories have ~10–12 months of data each, which is forecastable. If a user asks to forecast a specific SKU, the tool substitutes the category and (usually) says so in its answer — see Limitations.
-- **Relative date phrases anchor to the dataset's `MAX(orderDate)`**, not wall-clock time (see AI Approach above).
-- **"Last month" and similar phrases are trailing windows** (e.g. the 30-ish days immediately before the anchor date), not calendar-aligned months. Simpler and consistent across every relative-range option; the resolved date range is always shown in the explainability panel regardless.
-- **No authentication.** Single shared, read-only dataset — acceptable per the assignment's deployment notes for a demo.
+- **No SLA/expected-delivery-date column exists**, so `status` is the delay signal: `DELIVERED` = on-time, `DELAYED`/`EXCEPTION` = late, `IN_TRANSIT`/`CANCELED` excluded (no completed outcome yet).
+- **Forecasting runs at product-category level, not per-SKU** — 355 of 400 rows have a distinct SKU, nowhere near enough history to fit a trend per SKU.
+- **Relative date phrases anchor to the dataset's `MAX(orderDate)`**, not wall-clock time.
+- **"Last month" and similar are trailing windows**, not calendar-aligned months.
+- **No authentication** — single shared, read-only dataset, acceptable per the assignment's deployment notes for a demo.
 
 ## Limitations
 
-- Forecasting is category-level only (see Assumptions).
-- No multi-turn conversation memory in Ask AI — each question is answered independently; there's no "and what about last month?" follow-up context.
-- Chart types are limited to line/bar/stat by design — a deterministic rule, not the model choosing arbitrary visualizations.
-- When a user names a specific SKU to forecast, the model *usually but not always* states in its prose answer that it substituted the category level (a smaller/faster model like `gpt-4o-mini` isn't perfectly consistent about this even with explicit prompting). The substitution itself is never hidden — the query plan and methodology text in the explainability panel always show the actual category used — but the natural-language sentence alone isn't 100% reliable on this point.
-- AI responses take roughly 3–12 seconds (two sequential model calls: routing, then grounded-answer generation). No streaming yet.
-- Query history is capped at the last 10 questions, no pagination.
-- Underlying-data tables show aggregated rows (the same rows behind each chart/answer — up to ~12), not a raw drill-down into all 400 orders.
+- Forecasting is category-level only.
+- No multi-turn conversation memory in Ask AI.
+- Chart types are limited to line/bar/stat by design.
+- When a user names a specific SKU, the model *usually* but not always states in prose that it substituted the category level (the query plan always shows it regardless).
+- AI responses take ~3–12 seconds (two sequential model calls). No streaming yet.
+- Query history capped at the last 10 questions, no pagination.
+- Underlying-data tables show aggregated rows, not a raw drill-down into all 400 orders.
 
 ## Future Improvements
 
-- Exponential smoothing as a second forecasting method, auto-selected by whichever has lower in-sample error.
+- Exponential smoothing as a second forecasting method.
 - Multi-turn chat context for follow-up questions.
-- Stream the routing/answer generation so the UI can show partial progress instead of one long wait.
-- Move aggregation to DB-side `groupBy` queries if the dataset ever grows past a size where fetch-then-aggregate-in-memory stops being the right tradeoff.
-- Pagination or a "load more" affordance on the query-history list.
-- Cache-tag-based Accelerate invalidation wired into `db:seed`, instead of relying on the `Order` cache's `ttl` to expire naturally after a manual reseed.
-- A dedicated test database for integration tests, instead of relying on whoever runs them to point `DATABASE_URL` at a non-production database.
-- CI (GitHub Actions) to run all three test layers automatically on push/PR — currently run manually.
+- Stream the routing/answer generation instead of one long wait.
+- Move aggregation to DB-side `groupBy` if the dataset grows significantly.
+- Pagination on the query-history list.
+- Cache-tag-based Accelerate invalidation wired into `db:seed`.
+- A dedicated test database for integration tests.
+- CI (GitHub Actions) to run all three test layers on push/PR.
