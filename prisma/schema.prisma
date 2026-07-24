@@ -42,9 +42,10 @@ model Order {
   @@index([region])
 }
 
-/// Persisted "Ask AI" question/answer pairs for the recent-questions list.
-/// `response` stores the full OrchestratorResponse JSON so history entries
-/// can be re-displayed instantly without a second AI call.
+/// Persisted "Ask AI" question/answer pairs for the recent-questions list
+/// and for audit/debugging. `response` is not replayed to the UI — clicking
+/// a history entry re-submits the question through POST /api/query for a
+/// fresh, real answer.
 model QueryLog {
   id        String   @id @default(cuid())
   question  String

@@ -153,7 +153,7 @@ These are forced by what's actually in the CSV, not arbitrary choices:
    - Late = `DELAYED` or `EXCEPTION`
    - `IN_TRANSIT` / `CANCELED` are excluded from on-time-rate and avg-delivery-time denominators (no completed outcome yet).
 2. **Forecasting granularity is `productCategory`, not raw `sku`.** 355 of the CSV's SKUs appear in only 1–3 orders across the whole year — not enough history to fit a trend. The 8 `productCategory` values have ~10–12 months of data points each, which is forecastable. The Forecast Tool accepts a category (required) and an optional SKU (informational only); if a user asks to forecast a specific SKU, the tool explains the substitution to category-level in its response rather than silently forecasting from 1–2 points.
-3. **Relative date phrases ("last month", "last 3 months") resolve against `MAX(orderDate)` in the dataset, not the server's wall-clock date.** The dataset is a static 2025 snapshot; anchoring to real "today" would silently return empty results. This anchor is computed once (cached) and reused by both the Query Tool and Forecast Tool.
+3. **Relative date phrases ("last month", "last 3 months") resolve against `MAX(orderDate)` in the dataset, not the server's wall-clock date.** The dataset is a static 2025 snapshot; anchoring to real "today" would silently return empty results. `datasetAnchorDate()` (`lib/date-anchor.ts`) recomputes this from the in-memory order array on each call — cheap at 400 rows, so no memoization — and is used only by the Query Tool (`lib/query-dsl.ts`); the Forecast Tool has no date filters and instead uses `datasetRange()` (`lib/dashboard.ts`) to bound its historical month series.
 
 ## 4. System Architecture
 
@@ -265,7 +265,7 @@ The UI never hides this — it's a panel next to the answer, not a debug drawer.
 Input: `{ category: ProductCategory, horizonMonths: 1-6 (default 4), sku?: string }`
 
 Method:
-1. Aggregate historical monthly `sum(quantity)` for the category (anchor = dataset's own range, §3.3).
+1. Aggregate historical monthly `sum(quantity)` for the category, over the full `datasetRange()` (§3.3) — not the Query Tool's relative-date anchor, which the Forecast Tool doesn't use.
 2. Fit ordinary least-squares linear regression (month index → quantity).
 3. Project `horizonMonths` forward; floor forecasts at 0.
 4. Inventory recommendation = `forecast + 1.5 × stddev(residuals)` (simple safety-stock buffer), stated explicitly as a formula in the response — not AI-invented.
