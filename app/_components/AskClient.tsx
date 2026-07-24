@@ -93,7 +93,7 @@ export function AskClient() {
           e.preventDefault();
           submit(question);
         }}
-        className="flex gap-2"
+        className="flex flex-col gap-2 sm:flex-row"
       >
         <input
           value={question}
@@ -104,7 +104,7 @@ export function AskClient() {
         <button
           type="submit"
           disabled={loading || !question.trim()}
-          className="rounded bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900"
+          className="rounded bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900 sm:w-auto"
         >
           {loading ? "Thinking…" : "Ask"}
         </button>

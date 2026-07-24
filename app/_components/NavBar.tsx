@@ -13,7 +13,7 @@ export function NavBar() {
 
   return (
     <header className="border-b border-zinc-200 dark:border-zinc-800">
-      <nav className="mx-auto flex max-w-6xl items-center gap-8 px-6 py-4">
+      <nav className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-4 sm:gap-x-8 sm:px-6">
         <span className="font-semibold text-zinc-900 dark:text-zinc-50">
           Logistics AI Dashboard
         </span>

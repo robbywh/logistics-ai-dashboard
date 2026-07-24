@@ -31,7 +31,7 @@ export default function RootLayout({
     >
       <body className="flex min-h-full flex-col bg-zinc-50 text-zinc-900 dark:bg-black dark:text-zinc-50">
         <NavBar />
-        <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-6 py-8">
+        <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-4 py-8 sm:px-6">
           {children}
         </main>
       </body>
