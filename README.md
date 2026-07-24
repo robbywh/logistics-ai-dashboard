@@ -39,8 +39,12 @@ Then open `http://localhost:3000`. `/` is the descriptive dashboard (no AI depen
 
 ### Tests
 
+Three layers (see [Testing](#testing) below for the full breakdown):
+
 ```bash
-npm test    # vitest — 22 unit tests over the aggregation, query DSL, date-anchor, and forecast logic
+npm test                    # unit — 30 tests, no DB required
+npm run test:integration    # 8 tests — real DB required, see the Testing section's warning
+npm run test:e2e            # 7 tests — Playwright; run `npx playwright install chromium` once first
 ```
 
 ### Deployment
@@ -97,6 +101,26 @@ Next.js App Router (Route Handlers)
 - **React Query for client-side state.** Both pages replaced manual `useEffect`/`useState` fetch plumbing with `@tanstack/react-query`. The dashboard keys its query on `["dashboard-summary", from, to]`, so re-selecting a previously-viewed date range in the same session is a cache hit. Ask AI keys history on `["query-history"]` and invalidates it in the `POST /api/query` mutation's `onSuccess`, so a newly-asked question shows up in the list immediately. This is a session-local complement to the Accelerate cache above, not a replacement — it doesn't share state across users/tabs.
 - **Query history persisted, not computed.** `QueryLog` (new Prisma model) stores `{ question, toolUsed, response }` per `/api/query` call, written by the route handler after the orchestrator returns — not inside the orchestrator, keeping "call the AI" and "log the result" as separate steps. `GET /api/query/history` returns the last 10. Clicking an entry in the UI re-submits that question through the normal `POST /api/query` mutation — it's a shortcut for "ask this again," not a replay of the stored answer, so it always reflects a real, current AI response rather than a cached one. Only the *read* endpoints (`/api/dashboard/summary`, `/api/query/history`) are cached (Accelerate server-side, React Query client-side) — the AI call itself is never served from a cache.
 
+## Testing
+
+A pyramid: most coverage at the bottom (fast, free, deterministic), fewer tests at the top (slower, needs more infrastructure). Full rationale in [`docs/FSD.md` §11](docs/FSD.md#11-testing-strategy).
+
+| Layer | Tool | Where | Count | Covers |
+|---|---|---|---|---|
+| Unit | Vitest | `lib/*.test.ts` | 30 | Pure functions only — aggregation, query DSL, date-anchor, forecasting, chart-type selection. No DB, no network. |
+| Integration | Vitest | `tests/integration/*.test.ts` | 8 | Real route handlers called directly against the real database. Only the OpenAI call (`generateText` from the `ai` SDK) is mocked — the tool-selection *computation* that runs after it is real. |
+| E2E | Playwright | `tests/e2e/*.spec.ts` | 7 | Real browser, real server. Dashboard specs hit the real DB (no AI dependency, so nothing to mock). Ask AI specs mock `/api/query` at the browser network layer and verify rendering. |
+
+```bash
+npm test                    # unit — fast, no DB required
+npm run test:integration    # real DB required — see warning below
+npm run test:e2e            # Playwright; `npx playwright install chromium` once first
+```
+
+**AI is never called for real in any automated test** — it's slow, costs money per run, and is non-deterministic (the model could pick a different tool between runs). Integration tests mock only `generateText`, feeding it a fixed tool-call shape and asserting the real, deterministic computation downstream is correct — the actual thing the assignment's architecture principle (§9: "AI must NOT generate answers without computation") requires to be trustworthy. Whether the model *itself* reliably picks the right tool for a given question was verified manually during development against the real API, not by an automated test — a deliberate scope cut, not an oversight.
+
+**⚠️ Integration tests write to whatever database `DATABASE_URL` points at** (a `QueryLog` row per test, cleaned up in `afterEach`). Point it at a local/dev database — never at the production database backing the live `/ask` page.
+
 ## AI Approach
 
 **Provider:** OpenAI via the [Vercel AI SDK](https://ai-sdk.dev) (`ai` + `@ai-sdk/openai`), model configurable via `OPENAI_MODEL` (default `gpt-4o-mini`).
@@ -139,3 +163,5 @@ Next.js App Router (Route Handlers)
 - Move aggregation to DB-side `groupBy` queries if the dataset ever grows past a size where fetch-then-aggregate-in-memory stops being the right tradeoff.
 - Pagination or a "load more" affordance on the query-history list.
 - Cache-tag-based Accelerate invalidation wired into `db:seed`, instead of relying on the `Order` cache's `ttl` to expire naturally after a manual reseed.
+- A dedicated test database for integration tests, instead of relying on whoever runs them to point `DATABASE_URL` at a non-production database.
+- CI (GitHub Actions) to run all three test layers automatically on push/PR — currently run manually.

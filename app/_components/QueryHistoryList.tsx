@@ -45,6 +45,7 @@ export function QueryHistoryList({
           <li key={entry.id}>
             <button
               type="button"
+              data-testid="history-entry"
               onClick={() => onSelect(entry)}
               className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-900"
             >

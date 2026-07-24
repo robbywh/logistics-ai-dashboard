@@ -325,3 +325,31 @@ Last 10 `QueryLog` rows, newest first. Read-only, no request body.
 - Multi-turn chat context for follow-up questions ("...and what about last month?").
 - Cache-tag-based invalidation (`$accelerate.invalidateAll()`) wired into the `db:seed` script, instead of relying on the `Order` cache's `ttl` to expire naturally after a manual reseed.
 - Pagination or "load more" on the query-history list, currently hard-capped at the last 10 questions.
+- A dedicated test database for integration tests, instead of relying on the developer to point `DATABASE_URL` at a non-production database (§11).
+- CI wiring (GitHub Actions) to run all three test layers on every push/PR — no such workflow exists yet; the three `npm run test:*` commands are currently run manually.
+
+## 11. Testing Strategy
+
+Three layers, pyramid-shaped: most coverage at the bottom (fast, free, deterministic), progressively less at the top (slower, requires more infrastructure).
+
+| Layer | Tool | Location | Count | What it verifies |
+|---|---|---|---|---|
+| Unit | Vitest | `lib/*.test.ts` | 30 tests, 4 files | Pure functions in isolation, against the real seed CSV as fixture data: aggregation (`dashboard.ts`), the query DSL + date-anchor resolution (`query-dsl.ts`, `date-anchor.ts`), forecasting (`forecast.ts`), chart-type selection (`chart-select.ts`). No DB, no network, no mocking needed — everything under test is already a pure function of its inputs. |
+| Integration | Vitest | `tests/integration/*.test.ts` | 8 tests, 3 files | Route handlers invoked directly (`GET`/`POST` exported functions called with real `Request`/`NextRequest` objects — no HTTP server spun up) against the real database behind `DATABASE_URL`. Verifies the wiring Vitest's unit layer can't: Prisma queries, Accelerate `cacheStrategy`, and — for `POST /api/query` — that a mocked tool-call selection still flows through the *real* `executeQueryAnalytics`/`forecastCategory` and results in a real `QueryLog` row. |
+| E2E | Playwright | `tests/e2e/*.spec.ts` | 7 tests, 3 files | Real browser (Chromium) against a real running Next.js server (a dedicated instance on port 3100, not the developer's usual `:3000`). Dashboard specs read the real seeded database, exercising the full stack with nothing mocked (the dashboard has no AI dependency, so this is safe and deterministic). Ask AI specs mock `/api/query`/`/api/query/history` at the Playwright network layer (`page.route`) and verify the browser renders each response shape correctly — answer, chart, explainability panel, clarify state, example-question and recent-question "ask again" shortcuts. |
+
+**Why the AI call itself is never made for real, at any layer:** a live OpenAI call is slow, costs money per run, and is non-deterministic — the model could pick a different tool or phrase an answer differently between two runs of the same test. None of that belongs in a suite meant to run on every commit. Instead:
+- The integration layer mocks only `generateText` from the `ai` SDK (`vi.mock("ai", ...)`, preserving the real `tool()` export via `importOriginal` since `lib/ai/tools.ts` needs it) — feeding it a fixed tool-call shape and asserting the *deterministic computation downstream* is correct. This is exactly the boundary the assignment's own architecture principle draws (§9 of `REQUIREMENTS.md`: "AI must NOT generate answers without computation") — computation is what needs to be trustworthy and testable, not the model's specific wording.
+- The E2E layer goes one level further out and mocks the whole `/api/query` HTTP call, since by that point the goal is "does the browser render this response correctly," not "does the AI pick the right tool" (already covered by the integration layer).
+- Tool-selection *behavior itself* (does the model actually pick `queryAnalytics` for "which carrier has the highest delay rate") is the one thing genuinely untested by automation — verified manually during development against the real API, per the assignment's own time-box guidance not to over-engineer.
+
+**Test-only additions to production code, and why they're safe:** `KpiCard` and `QueryHistoryList`'s list items gained `data-testid` attributes (`kpi-total-orders`, `history-entry`, etc.) purely so Playwright has stable selectors that don't break when copy changes — number-only KPI values and duplicate question text (example-question button vs. history-list button) aren't reliably selectable by text/role alone. These are inert `data-*` attributes with no runtime behavior.
+
+**⚠️ Integration tests write to whatever database `DATABASE_URL` points at** — each test creates one or more `QueryLog` rows, always deleted in `afterEach` (matched by a unique marker prefix per file, so a crashed run's leftovers are still identifiable and cleanable). Run these against a local/dev database only; never against the production database that backs the live `/ask` page's recent-questions list. This project doesn't provision a separate test database (§10) — a deliberate scope cut for a 6–10 hour time-box, not an oversight.
+
+```bash
+npm test                    # unit only — fast, no DB required (alias for test:unit)
+npm run test:unit           # same as above
+npm run test:integration    # real DB required — see the caution above
+npm run test:e2e            # Playwright — needs `npx playwright install chromium` once; starts its own server on :3100
+```

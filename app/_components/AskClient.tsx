@@ -107,12 +107,14 @@ export function AskClient() {
         className="flex flex-col gap-2 sm:flex-row"
       >
         <input
+          data-testid="ask-question-input"
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
           placeholder="e.g. Which carrier has the highest delay rate?"
           className="flex-1 rounded border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
         />
         <button
+          data-testid="ask-submit-button"
           type="submit"
           disabled={loading || !question.trim()}
           className="rounded bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900 sm:w-auto"
