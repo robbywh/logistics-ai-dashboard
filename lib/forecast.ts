@@ -74,7 +74,14 @@ function nextMonths(lastMonth: string, count: number): string[] {
   return months;
 }
 
-/** Ordinary least squares over (monthIndex, quantity) pairs. */
+/**
+ * Ordinary least squares over (monthIndex, quantity) pairs. Only called
+ * from forecastCategory after its `historical.length < MIN_HISTORY_MONTHS`
+ * (3) guard, so `n` here is always >= 3 — `xs` (0..n-1) always has nonzero
+ * variance and `n - 1` is always >= 2, so neither division below can hit a
+ * zero denominator. No defensive fallback for that — an unreachable branch
+ * is dead code, not safety.
+ */
 function fitLinearRegression(ys: number[]): { slope: number; intercept: number; residualStdDev: number } {
   const n = ys.length;
   const xs = ys.map((_, i) => i);
@@ -87,12 +94,11 @@ function fitLinearRegression(ys: number[]): { slope: number; intercept: number; 
     numerator += (xs[i] - xMean) * (ys[i] - yMean);
     denominator += (xs[i] - xMean) ** 2;
   }
-  const slope = denominator === 0 ? 0 : numerator / denominator;
+  const slope = numerator / denominator;
   const intercept = yMean - slope * xMean;
 
   const residuals = ys.map((y, i) => y - (intercept + slope * xs[i]));
-  const residualVariance =
-    n > 1 ? residuals.reduce((sum, r) => sum + r * r, 0) / (n - 1) : 0;
+  const residualVariance = residuals.reduce((sum, r) => sum + r * r, 0) / (n - 1);
 
   return { slope, intercept, residualStdDev: Math.sqrt(residualVariance) };
 }

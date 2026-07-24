@@ -139,8 +139,6 @@ export function AskClient() {
         ))}
       </div>
 
-      <QueryHistoryList onSelect={selectHistoryEntry} />
-
       {error && (
         <div className="rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
           {error instanceof Error ? error.message : "Something went wrong."}
@@ -184,6 +182,11 @@ export function AskClient() {
           />
         </div>
       )}
+
+      {/* Below the answer, not above it — a growing history list must never
+          push the thing the user just asked for further down the page. Its
+          own internal scroll (see QueryHistoryList) keeps it compact too. */}
+      <QueryHistoryList onSelect={selectHistoryEntry} />
     </div>
   );
 }

@@ -42,9 +42,10 @@ Then open `http://localhost:3000`. `/` is the descriptive dashboard (no AI depen
 Three layers (see [Testing](#testing) below for the full breakdown):
 
 ```bash
-npm test                    # unit — 30 tests, no DB required
+npm test                    # unit — 48 tests, no DB required
+npm run test:coverage       # unit tests + coverage report
 npm run test:integration    # 8 tests — real DB required, see the Testing section's warning
-npm run test:e2e            # 7 tests — Playwright; run `npx playwright install chromium` once first
+npm run test:e2e            # 8 tests — Playwright; run `npx playwright install chromium` once first
 ```
 
 ### Deployment
@@ -99,7 +100,7 @@ Next.js App Router (Route Handlers)
 - **Prisma 7 + Accelerate.** This project pins `prisma@7`, which removed the bundled query engine binary in favor of either a driver adapter or Prisma Accelerate. Since the database is Prisma Postgres (accessed through Accelerate's connection pool), the client is constructed with `accelerateUrl` (`@prisma/extension-accelerate`) rather than a driver adapter — see `lib/prisma.ts`. Connection config lives in `prisma.config.ts`, not the schema's `datasource` block; the generated client (`generated/prisma/`) is gitignored and regenerated via `postinstall`.
 - **Accelerate query caching, scoped to the one read path that's safe to cache.** `getAllOrders()` (`lib/orders.ts`) is the single `findMany()` behind every dashboard request and every AI query — same no-arg call every time, against a dataset that only changes via a manual `db:seed` re-run. The client is wrapped with `withAccelerate()` and that query sets `cacheStrategy: { ttl: 300, swr: 600 }`, so repeat requests hit Accelerate's edge cache instead of the database. One cache entry covers all date ranges, since filtering happens in-memory after the fetch. `QueryLog` reads deliberately do **not** use `cacheStrategy` — that table changes on every question, and an Accelerate cache would show a stale "recent questions" list until the TTL expired (a real bug I hit and fixed while building this: the history list didn't show the question I'd just asked). After a production `Order` reseed, call `prisma.$accelerate.invalidateAll()` (or just wait out the `ttl`) to drop the stale entry.
 - **React Query for client-side state.** Both pages replaced manual `useEffect`/`useState` fetch plumbing with `@tanstack/react-query`. The dashboard keys its query on `["dashboard-summary", from, to]`, so re-selecting a previously-viewed date range in the same session is a cache hit. Ask AI keys history on `["query-history"]` and invalidates it in the `POST /api/query` mutation's `onSuccess`, so a newly-asked question shows up in the list immediately. This is a session-local complement to the Accelerate cache above, not a replacement — it doesn't share state across users/tabs.
-- **Query history persisted, not computed.** `QueryLog` (new Prisma model) stores `{ question, toolUsed, response }` per `/api/query` call, written by the route handler after the orchestrator returns — not inside the orchestrator, keeping "call the AI" and "log the result" as separate steps. `GET /api/query/history` returns the last 10. Clicking an entry in the UI re-submits that question through the normal `POST /api/query` mutation — it's a shortcut for "ask this again," not a replay of the stored answer, so it always reflects a real, current AI response rather than a cached one. Only the *read* endpoints (`/api/dashboard/summary`, `/api/query/history`) are cached (Accelerate server-side, React Query client-side) — the AI call itself is never served from a cache.
+- **Query history persisted, not computed.** `QueryLog` (new Prisma model) stores `{ question, toolUsed, response }` per `/api/query` call, written by the route handler after the orchestrator returns — not inside the orchestrator, keeping "call the AI" and "log the result" as separate steps. `GET /api/query/history` returns the last 10. Clicking an entry in the UI re-submits that question through the normal `POST /api/query` mutation — it's a shortcut for "ask this again," not a replay of the stored answer, so it always reflects a real, current AI response rather than a cached one. Only the *read* endpoints (`/api/dashboard/summary`, `/api/query/history`) are cached (Accelerate server-side, React Query client-side) — the AI call itself is never served from a cache. The list itself renders *below* the answer, not between the input and the answer, and is capped at `max-h-56 overflow-y-auto` — otherwise a growing history list pushes the thing the user just asked for further down the page on every visit, which is exactly what happened before this was fixed.
 
 ## Testing
 
@@ -107,12 +108,13 @@ A pyramid: most coverage at the bottom (fast, free, deterministic), fewer tests 
 
 | Layer | Tool | Where | Count | Covers |
 |---|---|---|---|---|
-| Unit | Vitest | `lib/*.test.ts` | 30 | Pure functions only — aggregation, query DSL, date-anchor, forecasting, chart-type selection. No DB, no network. |
+| Unit | Vitest | `lib/*.test.ts` | 48 | Pure functions only — aggregation, query DSL, date-anchor, forecasting, chart-type selection. No DB, no network. 100% coverage over this scope. |
 | Integration | Vitest | `tests/integration/*.test.ts` | 8 | Real route handlers called directly against the real database. Only the OpenAI call (`generateText` from the `ai` SDK) is mocked — the tool-selection *computation* that runs after it is real. |
-| E2E | Playwright | `tests/e2e/*.spec.ts` | 7 | Real browser, real server. Dashboard specs hit the real DB (no AI dependency, so nothing to mock). Ask AI specs mock `/api/query` at the browser network layer and verify rendering. |
+| E2E | Playwright | `tests/e2e/*.spec.ts` | 8 | Real browser, real server. Dashboard specs hit the real DB (no AI dependency, so nothing to mock). Ask AI specs mock `/api/query` at the browser network layer and verify rendering — including that a long recent-questions list stays capped/scrollable instead of pushing the answer down. |
 
 ```bash
 npm test                    # unit — fast, no DB required
+npm run test:coverage       # unit tests + v8 coverage report (text + html + lcov in coverage/)
 npm run test:integration    # real DB required — see warning below
 npm run test:e2e            # Playwright; `npx playwright install chromium` once first
 ```
@@ -120,6 +122,8 @@ npm run test:e2e            # Playwright; `npx playwright install chromium` once
 **AI is never called for real in any automated test** — it's slow, costs money per run, and is non-deterministic (the model could pick a different tool between runs). Integration tests mock only `generateText`, feeding it a fixed tool-call shape and asserting the real, deterministic computation downstream is correct — the actual thing the assignment's architecture principle (§9: "AI must NOT generate answers without computation") requires to be trustworthy. Whether the model *itself* reliably picks the right tool for a given question was verified manually during development against the real API, not by an automated test — a deliberate scope cut, not an oversight.
 
 **⚠️ Integration tests write to whatever database `DATABASE_URL` points at** (a `QueryLog` row per test, cleaned up in `afterEach`). Point it at a local/dev database — never at the production database backing the live `/ask` page.
+
+**Coverage is scoped to `lib/`** (unit-testable pure functions) minus the DB/AI-touching files that the integration layer covers instead (`lib/ai/**`, `lib/prisma.ts`, `lib/orders.ts`, `lib/query-log.ts`) — currently **100%** statements/branches/functions/lines. No enforced threshold; it's a number to watch, not a gate. Getting there surfaced two genuinely dead branches (`dashboard.ts`'s and `forecast.ts`'s defensive zero-division guards, both structurally unreachable given their callers' invariants) — removed rather than tested around, since a contrived test for unreachable code proves nothing. Full before/after breakdown in [`docs/FSD.md` §11](docs/FSD.md#11-testing-strategy).
 
 ## AI Approach
 

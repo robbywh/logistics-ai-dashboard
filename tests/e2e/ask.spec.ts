@@ -129,4 +129,53 @@ test.describe("Ask AI", () => {
     // of stored data (see README "Query history persisted, not computed").
     expect(callCount).toBe(1);
   });
+
+  test("keeps recent questions below the answer, in a bounded scroll region — not blocking the answer as history grows", async ({
+    page,
+  }) => {
+    const manyEntries = Array.from({ length: 12 }, (_, i) => ({
+      id: String(i),
+      question: `Historical question number ${i}`,
+      toolUsed: "queryAnalytics",
+      response: {},
+      createdAt: new Date().toISOString(),
+    }));
+    await page.route("**/api/query/history", (route) =>
+      route.fulfill({ json: { history: manyEntries } }),
+    );
+    await page.route("**/api/query", (route) =>
+      route.fulfill({
+        json: {
+          status: "ok",
+          toolUsed: "queryAnalytics",
+          answer: "There are 400 orders in total.",
+          queryPlan: {},
+          chartType: "stat",
+          metric: "count",
+          filtersApplied: {},
+          dateRange: { from: "2025-01-01", to: "2025-12-30" },
+          data: [{ label: "count", value: 400 }],
+        },
+      }),
+    );
+
+    await page.goto("/ask");
+    await page.getByTestId("ask-question-input").fill("How many orders are there?");
+    await page.getByTestId("ask-submit-button").click();
+    await expect(page.getByText("There are 400 orders in total.")).toBeVisible();
+
+    // The answer must sit above "Recent questions" in the DOM/visually —
+    // a long history list must never push the just-asked answer down.
+    const answerBox = await page.getByText("There are 400 orders in total.").boundingBox();
+    const historyHeadingBox = await page.getByText("Recent questions").boundingBox();
+    expect(answerBox).not.toBeNull();
+    expect(historyHeadingBox).not.toBeNull();
+    expect(answerBox!.y).toBeLessThan(historyHeadingBox!.y);
+
+    // With 12 entries, the list must scroll internally rather than growing
+    // the page — i.e. its own scrollHeight exceeds its own clientHeight.
+    const list = page.getByTestId("history-entry").first().locator("xpath=ancestor::ul");
+    const isScrollable = await list.evaluate((el) => el.scrollHeight > el.clientHeight);
+    expect(isScrollable).toBe(true);
+  });
 });

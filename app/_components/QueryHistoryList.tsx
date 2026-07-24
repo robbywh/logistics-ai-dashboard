@@ -40,7 +40,7 @@ export function QueryHistoryList({
       <h2 className="mb-2 text-xs font-semibold tracking-wide text-zinc-500 uppercase dark:text-zinc-400">
         Recent questions
       </h2>
-      <ul className="flex flex-col gap-1">
+      <ul className="flex max-h-56 flex-col gap-1 overflow-y-auto">
         {history.map((entry) => (
           <li key={entry.id}>
             <button

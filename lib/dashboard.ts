@@ -88,11 +88,13 @@ export function computeDashboardSummary(
     else entry.late++;
     carrierStats.set(order.carrier, entry);
   }
+  // No d + l === 0 guard: every carrierStats entry was created inside the
+  // loop above by an actual completed order, so d + l is always >= 1 here.
   const carrierBreakdown = [...carrierStats.entries()]
     .map(([carrier, { delivered: d, late: l }]) => ({
       carrier,
       total: d + l,
-      delayRate: d + l > 0 ? l / (d + l) : 0,
+      delayRate: l / (d + l),
     }))
     .sort((a, b) => b.delayRate - a.delayRate);
 
