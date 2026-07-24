@@ -1,15 +1,21 @@
 import { expect, test } from "@playwright/test";
 
 /**
- * E2E layer for Ask AI. /api/query is mocked at the browser network layer
- * (page.route) rather than called for real: a real call means a real
- * OpenAI request (cost, latency, non-determinism) for every CI run, and
- * whether the model calls the right tool is already covered by
- * tests/integration/query-route.test.ts (which mocks only the AI SDK call
- * and exercises the real computation + persistence). This layer's job is
- * verifying the browser renders a given API response correctly — chart,
- * explainability panel, clarify state, example-question / history
- * shortcuts — not re-verifying AI routing.
+ * E2E layer for Ask AI. /api/query and /api/query/history are mocked at
+ * the browser network layer (page.route) rather than called for real: a
+ * real /api/query call means a real OpenAI request (cost, latency,
+ * non-determinism) for every CI run, and whether the model calls the right
+ * tool is already covered by tests/integration/query-route.test.ts (which
+ * mocks only the AI SDK call and exercises the real computation +
+ * persistence). This layer's job is verifying the browser renders a given
+ * API response correctly — chart, explainability panel, clarify state,
+ * example-question / history shortcuts, infinite-scroll pagination — not
+ * re-verifying AI routing or backend pagination logic (see
+ * tests/integration/query-history.test.ts for that).
+ *
+ * "**\/api/query/history**" (trailing **, not just the bare path) because
+ * the route now carries a query string (?limit=&cursor=) — a glob without
+ * a trailing wildcard wouldn't match a URL with query params appended.
  */
 test.describe("Ask AI", () => {
   test("asking a question renders the answer and explainability panel", async ({ page }) => {
@@ -28,7 +34,9 @@ test.describe("Ask AI", () => {
         },
       }),
     );
-    await page.route("**/api/query/history", (route) => route.fulfill({ json: { history: [] } }));
+    await page.route("**/api/query/history**", (route) =>
+      route.fulfill({ json: { history: [], nextCursor: null } }),
+    );
 
     await page.goto("/ask");
     await page.getByTestId("ask-question-input").fill("How many orders are there?");
@@ -55,7 +63,9 @@ test.describe("Ask AI", () => {
         },
       });
     });
-    await page.route("**/api/query/history", (route) => route.fulfill({ json: { history: [] } }));
+    await page.route("**/api/query/history**", (route) =>
+      route.fulfill({ json: { history: [], nextCursor: null } }),
+    );
 
     await page.goto("/ask");
     await page.getByRole("button", { name: "Which carrier has the highest delay rate?" }).click();
@@ -75,7 +85,9 @@ test.describe("Ask AI", () => {
         },
       }),
     );
-    await page.route("**/api/query/history", (route) => route.fulfill({ json: { history: [] } }));
+    await page.route("**/api/query/history**", (route) =>
+      route.fulfill({ json: { history: [], nextCursor: null } }),
+    );
 
     await page.goto("/ask");
     await page.getByTestId("ask-question-input").fill("What's the weather today?");
@@ -87,8 +99,43 @@ test.describe("Ask AI", () => {
     await expect(page.getByText("How this was computed")).not.toBeVisible();
   });
 
+  test("recent questions are collapsed by default and fetch nothing until opened", async ({
+    page,
+  }) => {
+    let historyRequestCount = 0;
+    await page.route("**/api/query/history**", (route) => {
+      historyRequestCount += 1;
+      return route.fulfill({
+        json: {
+          history: [
+            {
+              id: "1",
+              // Deliberately not one of AskClient's EXAMPLE_QUESTIONS —
+              // that text is always visible as a chip, which would make a
+              // getByText visibility assertion here meaningless.
+              question: "A question only the history API returns",
+              toolUsed: "queryAnalytics",
+              response: {},
+              createdAt: new Date().toISOString(),
+            },
+          ],
+          nextCursor: null,
+        },
+      });
+    });
+
+    await page.goto("/ask");
+    await expect(page.getByTestId("history-entry")).not.toBeVisible();
+    expect(historyRequestCount).toBe(0);
+
+    await page.getByText("Recent questions").click();
+
+    await expect(page.getByTestId("history-entry")).toBeVisible();
+    expect(historyRequestCount).toBe(1);
+  });
+
   test("clicking a recent-questions entry re-submits it for a fresh answer", async ({ page }) => {
-    await page.route("**/api/query/history", (route) =>
+    await page.route("**/api/query/history**", (route) =>
       route.fulfill({
         json: {
           history: [
@@ -100,6 +147,7 @@ test.describe("Ask AI", () => {
               createdAt: new Date().toISOString(),
             },
           ],
+          nextCursor: null,
         },
       }),
     );
@@ -122,6 +170,7 @@ test.describe("Ask AI", () => {
     });
 
     await page.goto("/ask");
+    await page.getByText("Recent questions").click();
     await page.getByTestId("history-entry").click();
 
     await expect(page.getByText("GLS has the highest delay rate.")).toBeVisible();
@@ -140,8 +189,8 @@ test.describe("Ask AI", () => {
       response: {},
       createdAt: new Date().toISOString(),
     }));
-    await page.route("**/api/query/history", (route) =>
-      route.fulfill({ json: { history: manyEntries } }),
+    await page.route("**/api/query/history**", (route) =>
+      route.fulfill({ json: { history: manyEntries, nextCursor: null } }),
     );
     await page.route("**/api/query", (route) =>
       route.fulfill({
@@ -172,10 +221,56 @@ test.describe("Ask AI", () => {
     expect(historyHeadingBox).not.toBeNull();
     expect(answerBox!.y).toBeLessThan(historyHeadingBox!.y);
 
+    await page.getByText("Recent questions").click();
+
     // With 12 entries, the list must scroll internally rather than growing
     // the page — i.e. its own scrollHeight exceeds its own clientHeight.
     const list = page.getByTestId("history-entry").first().locator("xpath=ancestor::ul");
     const isScrollable = await list.evaluate((el) => el.scrollHeight > el.clientHeight);
     expect(isScrollable).toBe(true);
+  });
+
+  test("infinite scroll: scrolling the history list to the bottom loads the next page", async ({
+    page,
+  }) => {
+    // Page 1 has enough rows to overflow the list's max-h-56 box on its
+    // own — with too few rows to overflow, the sentinel is visible (and
+    // auto-loads the next page) the instant the list opens, since there's
+    // nothing to scroll yet. That's correct behavior (fills visible empty
+    // space up front), but it means this test needs a first page that
+    // genuinely requires a scroll gesture to reach the sentinel.
+    const page1 = Array.from({ length: 10 }, (_, i) => ({
+      id: `p1-${i}`,
+      question: `Page 1 question ${i}`,
+      toolUsed: "queryAnalytics",
+      response: {},
+      createdAt: new Date().toISOString(),
+    }));
+    const page2 = Array.from({ length: 2 }, (_, i) => ({
+      id: `p2-${i}`,
+      question: `Page 2 question ${i}`,
+      toolUsed: "queryAnalytics",
+      response: {},
+      createdAt: new Date().toISOString(),
+    }));
+    await page.route("**/api/query/history**", (route) => {
+      const url = new URL(route.request().url());
+      const cursor = url.searchParams.get("cursor");
+      if (!cursor) {
+        return route.fulfill({ json: { history: page1, nextCursor: "p1-9" } });
+      }
+      return route.fulfill({ json: { history: page2, nextCursor: null } });
+    });
+
+    await page.goto("/ask");
+    await page.getByText("Recent questions").click();
+    await expect(page.getByText("Page 1 question 0")).toBeVisible();
+    await expect(page.getByText("Page 2 question 0")).not.toBeVisible();
+
+    const list = page.getByTestId("history-entry").first().locator("xpath=ancestor::ul");
+    await list.evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
+
+    await expect(page.getByText("Page 2 question 0")).toBeVisible();
+    await expect(page.getByText("Page 2 question 1")).toBeVisible();
   });
 });

@@ -9,6 +9,11 @@ export type QueryLogEntry = {
   createdAt: string;
 };
 
+export type QueryLogPage = {
+  items: QueryLogEntry[];
+  nextCursor: string | null;
+};
+
 /** Fire-and-forget from the route's perspective: a logging failure must
  * never fail the user-facing /api/query response. */
 export async function logQuery(
@@ -21,22 +26,38 @@ export async function logQuery(
   });
 }
 
-const RECENT_LIMIT = 10;
+const DEFAULT_PAGE_SIZE = 5;
+const MAX_PAGE_SIZE = 20;
 
-/** No cacheStrategy here, unlike getAllOrders(): QueryLog changes on every
- * question, and the UI expects a freshly-submitted question to show up in
- * history right away (see AskClient's post-mutation invalidation). */
-export async function getRecentQueryLogs(): Promise<QueryLogEntry[]> {
+/**
+ * Cursor-based pagination (cursor = a QueryLog id), newest first — backs
+ * the "recent questions" infinite scroll in the UI. No cacheStrategy here,
+ * unlike getAllOrders(): QueryLog changes on every question, and the UI
+ * expects a freshly-submitted question to show up in history right away
+ * (see AskClient's post-mutation invalidation).
+ */
+export async function getRecentQueryLogs(
+  options: { cursor?: string; limit?: number } = {},
+): Promise<QueryLogPage> {
+  const limit = Math.min(Math.max(options.limit ?? DEFAULT_PAGE_SIZE, 1), MAX_PAGE_SIZE);
+
   const rows = await prisma.queryLog.findMany({
     orderBy: { createdAt: "desc" },
-    take: RECENT_LIMIT,
+    take: limit + 1, // one extra to know whether a next page exists
+    ...(options.cursor ? { cursor: { id: options.cursor }, skip: 1 } : {}),
   });
 
-  return rows.map((row) => ({
-    id: row.id,
-    question: row.question,
-    toolUsed: row.toolUsed,
-    response: row.response as unknown as OrchestratorResponse,
-    createdAt: row.createdAt.toISOString(),
-  }));
+  const hasMore = rows.length > limit;
+  const page = rows.slice(0, limit);
+
+  return {
+    items: page.map((row) => ({
+      id: row.id,
+      question: row.question,
+      toolUsed: row.toolUsed,
+      response: row.response as unknown as OrchestratorResponse,
+      createdAt: row.createdAt.toISOString(),
+    })),
+    nextCursor: hasMore ? page[page.length - 1].id : null,
+  };
 }

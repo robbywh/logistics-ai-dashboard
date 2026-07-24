@@ -40,8 +40,8 @@ npm run dev
 ```bash
 npm test                    # unit — 48 tests, no DB required
 npm run test:coverage       # unit tests + coverage report
-npm run test:integration    # 8 tests — real DB required (see Testing below)
-npm run test:e2e            # 8 tests — Playwright; `npx playwright install chromium` once first
+npm run test:integration    # 9 tests — real DB required (see Testing below)
+npm run test:e2e            # 10 tests — Playwright; `npx playwright install chromium` once first
 ```
 
 ### Deployment
@@ -87,7 +87,8 @@ Next.js Route Handlers
 - **Prisma 7 + Accelerate.** `prisma@7` removed the bundled query engine binary; the client connects via `accelerateUrl` (`@prisma/extension-accelerate`, `lib/prisma.ts`) since the database is Prisma Postgres. Connection config lives in `prisma.config.ts`, not the schema.
 - **Accelerate caches the one read path that's safe to cache.** `getAllOrders()` sets `cacheStrategy: { ttl: 300, swr: 600 }` — the dataset only changes via manual reseed. `QueryLog` reads deliberately aren't cached (that table changes on every question; caching it would show a stale recent-questions list).
 - **React Query for client-side state**, replacing manual `useEffect`/`useState` fetch plumbing. Dashboard keys on `["dashboard-summary", from, to]`; Ask AI's history list (`["query-history"]`) is invalidated after every successful mutation.
-- **Query history is persisted, not computed** — `QueryLog` stores `{ question, toolUsed, response }`, written by the route handler after the orchestrator returns. Clicking a history entry re-submits the question through the normal mutation (a real, fresh AI call — not a replay). The list renders below the answer and is height-capped (`max-h-56 overflow-y-auto`), so it never pushes the answer down as history grows.
+- **Query history is persisted, not computed** — `QueryLog` stores `{ question, toolUsed, response }`, written by the route handler after the orchestrator returns. Clicking a history entry re-submits the question through the normal mutation (a real, fresh AI call — not a replay).
+- **Recent questions: collapsed, lazy, infinite-scrolled.** The list is a closed `<details>` below the answer — nothing fetches until the user opens it. Once open, `GET /api/query/history` is cursor-paginated (5/page); scrolling the list's own bounded `max-h-56 overflow-y-auto` box to its end loads the next page via `useInfiniteQuery`, so the box's height never grows no matter how much history exists.
 
 ## Testing
 
@@ -96,8 +97,8 @@ A pyramid — most coverage at the bottom, fewest slower tests at the top. Full 
 | Layer | Tool | Where | Count | Covers |
 |---|---|---|---|---|
 | Unit | Vitest | `lib/*.test.ts` | 48 | Pure functions — aggregation, query DSL, date-anchor, forecasting, chart selection. No DB, no network. 100% coverage. |
-| Integration | Vitest | `tests/integration/*.test.ts` | 8 | Real route handlers against the real database. Only the OpenAI call is mocked — the computation after it is real. |
-| E2E | Playwright | `tests/e2e/*.test.ts` | 8 | Real browser + server. Dashboard specs hit the real DB; Ask AI specs mock `/api/query` at the network layer and verify rendering. |
+| Integration | Vitest | `tests/integration/*.test.ts` | 9 | Real route handlers against the real database. Only the OpenAI call is mocked — the computation after it is real. |
+| E2E | Playwright | `tests/e2e/*.test.ts` | 10 | Real browser + server. Dashboard specs hit the real DB; Ask AI specs mock `/api/query` at the network layer and verify rendering, including lazy-load and infinite-scroll pagination. |
 
 AI is never called for real in any automated test — slow, costs money, non-deterministic. Whether the model *itself* picks the right tool for a question was verified manually during development, not by CI — a deliberate scope cut.
 
@@ -130,7 +131,6 @@ AI is never called for real in any automated test — slow, costs money, non-det
 - Chart types are limited to line/bar/stat by design.
 - When a user names a specific SKU, the model *usually* but not always states in prose that it substituted the category level (the query plan always shows it regardless).
 - AI responses take ~3–12 seconds (two sequential model calls). No streaming yet.
-- Query history capped at the last 10 questions, no pagination.
 - Underlying-data tables show aggregated rows, not a raw drill-down into all 400 orders.
 
 ## Future Improvements
@@ -139,7 +139,6 @@ AI is never called for real in any automated test — slow, costs money, non-det
 - Multi-turn chat context for follow-up questions.
 - Stream the routing/answer generation instead of one long wait.
 - Move aggregation to DB-side `groupBy` if the dataset grows significantly.
-- Pagination on the query-history list.
 - Cache-tag-based Accelerate invalidation wired into `db:seed`.
 - A dedicated test database for integration tests.
 - CI (GitHub Actions) to run all three test layers on push/PR.

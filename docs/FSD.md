@@ -193,7 +193,7 @@ Single-turn form (no multi-turn memory — each question is independent). On sub
 3. The route persists `{ question, toolUsed, response }` to `QueryLog` — awaited, but a write failure never fails the user-facing response.
 4. Renders answer, auto-selected chart, and an always-visible explainability panel (filters, metric/dimension, resolved date range, raw query plan, underlying-rows table).
 
-**Recent questions:** the last 10 `QueryLog` rows (`GET /api/query/history`), fetched via React Query. Clicking an entry re-submits it through the same mutation used for typing — a real "ask again," not a replay of the stored answer. The list renders *below* the response (not between the input and the answer) and is capped at `max-h-56 overflow-y-auto`, so a long history never pushes the answer down. A successful `POST /api/query` invalidates `["query-history"]` so the list updates immediately.
+**Recent questions:** a collapsed-by-default `<details>` below the response (not between the input and the answer). Nothing is fetched until opened (`useInfiniteQuery`'s `enabled: isOpen`) — visiting `/ask` never pays for a history fetch unless the user asks for it. Once open, `GET /api/query/history` is paginated by cursor (`?cursor=&limit=`, 5 per page, newest first); scrolling the list's own `max-h-56 overflow-y-auto` region to its end (an `IntersectionObserver` on a sentinel row, scoped to that scroll container, not the window) loads the next page — the box's height never grows regardless of how much history exists. Clicking an entry re-submits it through the same mutation used for typing — a real "ask again," not a replay of the stored answer. A successful `POST /api/query` invalidates `["query-history"]`, resetting back to the first page with the new question included.
 
 Covers the three REQUIREMENTS §4.2 example questions directly:
 - "Show delayed orders by week for the last 3 months" → `metric: count`, `filter: status in [DELAYED, EXCEPTION]`, `groupBy: week`, `relativeDateRange: last_3_months`.
@@ -264,11 +264,14 @@ Output: historical + forecast series, per-month recommendation, and a plain-Engl
 ### `POST /api/query { question: string }`
 See §5.4. `400` on empty question; `200` with a `clarify` status when the model can't resolve a tool; `502` on upstream AI failure (the dashboard never depends on this route). Persists a `QueryLog` row as a side effect.
 
-### `GET /api/query/history`
+### `GET /api/query/history?cursor=&limit=`
 ```ts
-{ history: { id: string; question: string; toolUsed: string; response: OrchestratorResponse; createdAt: string }[] }
+{
+  history: { id: string; question: string; toolUsed: string; response: OrchestratorResponse; createdAt: string }[]
+  nextCursor: string | null   // a QueryLog id; null when there's no next page
+}
 ```
-Last 10 rows, newest first.
+Newest first, cursor-paginated (default `limit`: 5, max: 20). `cursor` is the `id` of the last item from the previous page.
 
 ## 8. Non-Functional Requirements
 
@@ -290,7 +293,6 @@ Last 10 rows, newest first.
 - Exponential smoothing as a second forecast method.
 - Multi-turn chat context for follow-up questions.
 - Cache-tag-based invalidation wired into `db:seed`, instead of relying on `ttl` expiry.
-- Pagination on the query-history list.
 - A dedicated test database for integration tests.
 - CI (GitHub Actions) to run all three test layers on push/PR.
 
@@ -301,8 +303,8 @@ A pyramid: most coverage at the bottom (fast, free, deterministic), less at the 
 | Layer | Tool | Location | Count | What it verifies |
 |---|---|---|---|---|
 | Unit | Vitest | `lib/*.test.ts` | 48 tests, 5 files | Pure functions against the real seed CSV as fixture data: aggregation, query DSL, date-anchor, forecasting, chart selection. No DB, no network. 100% statement/branch/function/line coverage. |
-| Integration | Vitest | `tests/integration/*.test.ts` | 8 tests, 3 files | Route handlers invoked directly (real `Request`/`NextRequest`, no HTTP server) against the real database. Verifies Prisma queries, Accelerate `cacheStrategy`, and that a mocked tool-call still flows through the real `executeQueryAnalytics`/`forecastCategory` into a real `QueryLog` row. |
-| E2E | Playwright | `tests/e2e/*.test.ts` | 8 tests, 3 files | Real browser against a real server (port 3100). Dashboard specs read the real seeded DB (no AI dependency, nothing mocked). Ask AI specs mock `/api/query`/`/api/query/history` at the network layer and verify rendering — answer, chart, explainability, clarify state, history "ask again," and the bounded-scroll layout. |
+| Integration | Vitest | `tests/integration/*.test.ts` | 9 tests, 3 files | Route handlers invoked directly (real `Request`/`NextRequest`, no HTTP server) against the real database. Verifies Prisma queries, Accelerate `cacheStrategy`, cursor pagination boundaries, and that a mocked tool-call still flows through the real `executeQueryAnalytics`/`forecastCategory` into a real `QueryLog` row. Files run sequentially (`fileParallelism: false`) — a shared real database has no built-in test isolation, and a tight pagination-boundary assertion would flake if another file's rows landed in between otherwise. |
+| E2E | Playwright | `tests/e2e/*.test.ts` | 10 tests, 3 files | Real browser against a real server (port 3100). Dashboard specs read the real seeded DB (no AI dependency, nothing mocked). Ask AI specs mock `/api/query`/`/api/query/history` at the network layer and verify rendering — answer, chart, explainability, clarify state, history "ask again," the bounded-scroll layout, that history stays collapsed/unfetched until opened, and infinite-scroll pagination via a real scroll gesture. |
 
 **AI is mocked at every automated layer, never called for real** — a live call is slow, costs money, and is non-deterministic. Integration mocks only `generateText` from the `ai` SDK, feeding a fixed tool-call shape and asserting the real computation downstream — the boundary REQUIREMENTS §9 draws ("AI must NOT generate answers without computation"). E2E mocks the whole `/api/query` call, since by then the goal is "does the browser render this correctly," not tool selection. Whether the model *itself* picks the right tool was verified manually during development, not by CI.
 
