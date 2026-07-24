@@ -2,7 +2,7 @@
 
 An AI-powered analytics dashboard for a logistics client: a traditional KPI/chart dashboard plus a natural-language query interface backed by OpenAI tool-calling and a demand-forecasting tool. Built against [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md); full design rationale lives in [`docs/FSD.md`](docs/FSD.md).
 
-**Live URL:** _TODO — fill in once deployed with real credentials (see Deployment below)._
+**Live URL:** [logistics-ai-dashboard.robbywh.com](https://logistics-ai-dashboard.robbywh.com)
 
 ## Setup
 
@@ -23,6 +23,7 @@ cp .env.example .env
 | Variable | Required | Notes |
 |---|---|---|
 | `DATABASE_URL` | Yes | Prisma Postgres (Accelerate) connection string, `prisma+postgres://...`. Copy it from the Prisma Console (Database → Connection strings). |
+| `DATABASE_URL_POOLED` | No | On Prisma Compute, Prisma auto-injects this alongside a direct `DATABASE_URL` — the app and seed script prefer it when present (see `lib/prisma.ts`). Not needed locally if `DATABASE_URL` is already an Accelerate URL. |
 | `OPENAI_API_KEY` | Yes (for Ask AI) | The dashboard (`/`) works without it — only `/api/query` depends on it. |
 | `OPENAI_MODEL` | No | Defaults to `gpt-4o-mini`. |
 

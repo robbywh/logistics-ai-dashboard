@@ -16,7 +16,8 @@ async function main() {
   const csvText = fs.readFileSync(CSV_PATH, "utf-8");
   const orders = parseOrdersCsv(csvText);
 
-  const prisma = new PrismaClient({ accelerateUrl: process.env.DATABASE_URL! });
+  const accelerateUrl = process.env.DATABASE_URL_POOLED ?? process.env.DATABASE_URL!;
+  const prisma = new PrismaClient({ accelerateUrl });
 
   for (const order of orders) {
     await prisma.order.upsert({
