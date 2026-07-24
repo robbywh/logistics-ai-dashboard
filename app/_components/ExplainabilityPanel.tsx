@@ -1,3 +1,5 @@
+import { UnderlyingDataToggle } from "./UnderlyingDataToggle";
+
 type Props = {
   queryPlan: unknown;
   filtersApplied?: Record<string, string | undefined>;
@@ -6,6 +8,8 @@ type Props = {
   dateRange?: { from: string; to: string };
   methodology?: string;
   data?: { label: string; value: number }[];
+  historical?: { month: string; quantity: number }[];
+  forecast?: { month: string; quantity: number; recommendedInventory: number }[];
 };
 
 export function ExplainabilityPanel({
@@ -16,6 +20,8 @@ export function ExplainabilityPanel({
   dateRange,
   methodology,
   data,
+  historical,
+  forecast,
 }: Props) {
   const activeFilters = filtersApplied
     ? Object.entries(filtersApplied).filter((entry): entry is [string, string] => Boolean(entry[1]))
@@ -62,30 +68,37 @@ export function ExplainabilityPanel({
         </p>
       )}
 
-      {data && data.length > 0 && (
-        <details className="mt-3 border-t border-zinc-200 pt-3 dark:border-zinc-800">
-          <summary className="cursor-pointer text-zinc-600 dark:text-zinc-300">
-            Underlying data ({data.length} rows)
-          </summary>
-          <div className="mt-2 max-h-64 overflow-auto">
-            <table className="w-full text-left text-xs">
-              <thead>
-                <tr className="text-zinc-500 dark:text-zinc-400">
-                  <th className="py-1 pr-4">Label</th>
-                  <th className="py-1">Value</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.map((row) => (
-                  <tr key={row.label} className="border-t border-zinc-200 dark:border-zinc-800">
-                    <td className="py-1 pr-4">{row.label}</td>
-                    <td className="py-1">{row.value}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </details>
+      {data && (
+        <UnderlyingDataToggle
+          rows={data}
+          columns={[
+            { key: "label", label: "Label" },
+            { key: "value", label: "Value" },
+          ]}
+        />
+      )}
+
+      {historical && (
+        <UnderlyingDataToggle
+          rows={historical}
+          label={`Historical data (${historical.length} months)`}
+          columns={[
+            { key: "month", label: "Month" },
+            { key: "quantity", label: "Quantity" },
+          ]}
+        />
+      )}
+
+      {forecast && (
+        <UnderlyingDataToggle
+          rows={forecast}
+          label={`Forecast data (${forecast.length} months)`}
+          columns={[
+            { key: "month", label: "Month" },
+            { key: "quantity", label: "Forecast qty" },
+            { key: "recommendedInventory", label: "Recommended inventory" },
+          ]}
+        />
       )}
 
       <details className="mt-3 border-t border-zinc-200 pt-3 dark:border-zinc-800">

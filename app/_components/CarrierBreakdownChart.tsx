@@ -10,6 +10,7 @@ import {
   YAxis,
 } from "recharts";
 import { ChartCard } from "./ChartCard";
+import { UnderlyingDataToggle } from "./UnderlyingDataToggle";
 
 type Props = {
   data: { carrier: string; total: number; delayRate: number }[];
@@ -38,6 +39,14 @@ export function CarrierBreakdownChart({ data }: Props) {
           />
         </BarChart>
       </ResponsiveContainer>
+      <UnderlyingDataToggle
+        rows={chartData}
+        columns={[
+          { key: "carrier", label: "Carrier" },
+          { key: "total", label: "Completed orders" },
+          { key: "delayRatePct", label: "Delay rate %" },
+        ]}
+      />
     </ChartCard>
   );
 }

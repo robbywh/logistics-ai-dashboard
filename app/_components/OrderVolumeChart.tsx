@@ -10,6 +10,7 @@ import {
   YAxis,
 } from "recharts";
 import { ChartCard } from "./ChartCard";
+import { UnderlyingDataToggle } from "./UnderlyingDataToggle";
 
 type Props = {
   data: { month: string; count: number }[];
@@ -35,6 +36,13 @@ export function OrderVolumeChart({ data }: Props) {
           />
         </LineChart>
       </ResponsiveContainer>
+      <UnderlyingDataToggle
+        rows={data}
+        columns={[
+          { key: "month", label: "Month" },
+          { key: "count", label: "Orders" },
+        ]}
+      />
     </ChartCard>
   );
 }

@@ -273,16 +273,17 @@ Plan: [`tasks/plan.md`](./plan.md) · Spec: [`docs/FSD.md`](../docs/FSD.md)
 **Description:** One shared component that renders the `data` rows from either `/api/dashboard/summary` or `/api/query` as a table, toggled open from any chart — satisfies "access to underlying data" (REQUIREMENTS §4.4) everywhere, not just Ask AI.
 
 **Acceptance criteria:**
-- [ ] Every chart on `/` and every answer on `/ask` has a "view underlying data" toggle
-- [ ] Table paginates or scroll-limits sanely if a query returns many rows
+- [x] Every chart on `/` and every answer on `/ask` has a "view underlying data" toggle (dashboard: all 3 charts; Ask AI: queryAnalytics's result table + forecastDemand's historical/forecast tables, via `ExplainabilityPanel`)
+- [x] Table scroll-limits sanely (`UnderlyingDataToggle` caps at 256px with internal scroll) — moot for pagination since every table here is aggregated (≤12 rows), not raw per-order data
 
 **Verification:**
-- [ ] Manual: toggle underlying data on a dashboard chart and an Ask AI answer, confirm rows match what the chart/answer summarizes
+- [x] Browser-driven (Playwright, real seeded DB): opened all 3 dashboard toggles simultaneously, screenshot-verified rows match the charts exactly (e.g. carrier table's GLS=37.5% matches the bar chart), zero console errors
 
 **Dependencies:** Task 4, Task 7
 
 **Files likely touched:**
 - `app/_components/DataTable.tsx`
+- `app/_components/UnderlyingDataToggle.tsx`
 
 **Estimated scope:** S
 

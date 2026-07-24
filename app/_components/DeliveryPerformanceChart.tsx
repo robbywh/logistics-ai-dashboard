@@ -2,6 +2,7 @@
 
 import { Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { ChartCard } from "./ChartCard";
+import { UnderlyingDataToggle } from "./UnderlyingDataToggle";
 
 type Props = {
   onTime: number;
@@ -37,6 +38,13 @@ export function DeliveryPerformanceChart({ onTime, late }: Props) {
           <Tooltip />
         </PieChart>
       </ResponsiveContainer>
+      <UnderlyingDataToggle
+        rows={data}
+        columns={[
+          { key: "name", label: "Status" },
+          { key: "value", label: "Orders" },
+        ]}
+      />
     </ChartCard>
   );
 }

@@ -164,6 +164,8 @@ export function AskClient() {
           <ExplainabilityPanel
             queryPlan={response.queryPlan}
             methodology={response.methodology}
+            historical={response.historical}
+            forecast={response.forecast}
           />
         </div>
       )}
