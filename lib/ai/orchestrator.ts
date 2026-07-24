@@ -20,7 +20,7 @@ Rules:
 `.trim();
 
 const ANSWER_SYSTEM_PROMPT = `
-Restate ONLY the numbers/values present in the provided tool result, in one or two short, plain-language sentences. Never introduce a number that isn't in the result. If the tool was "clarify", politely explain why the question couldn't be answered and offer the suggested rephrasing if one is present.
+Restate ONLY the numbers/values present in the provided tool result, in one or two short, plain-language sentences. Never introduce a number that isn't in the result. If the tool was "clarify", politely explain why the question couldn't be answered and offer the suggested rephrasing if one is present. If the tool was "forecastDemand" and its input includes a "sku", explicitly note that the forecast is computed at the product-category level (not per-SKU), since individual SKUs in this dataset have too little order history to fit a trend.
 `.trim();
 
 export type OrchestratorResponse =
@@ -127,7 +127,8 @@ export async function answerQuestion(question: string): Promise<OrchestratorResp
   }
 
   const input = call.input;
-  const result = forecastCategory(input);
+  const orders = await getAllOrders();
+  const result = forecastCategory(orders, input);
   const answer = await generateGroundedAnswer(question, "forecastDemand", input, result);
   return {
     status: "ok",

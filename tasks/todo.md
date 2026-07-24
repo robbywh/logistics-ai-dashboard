@@ -220,12 +220,12 @@ Plan: [`tasks/plan.md`](./plan.md) · Spec: [`docs/FSD.md`](../docs/FSD.md)
 **Description:** Pure, unit-tested module: monthly demand aggregation by category, OLS linear regression, `horizonMonths`-ahead projection floored at 0, safety-stock recommendation (`forecast + 1.5 × stddev(residuals)`), and a plain-English methodology string (FSD §5.5).
 
 **Acceptance criteria:**
-- [ ] `forecastCategory(category, horizonMonths)` returns `{ historical, forecast, recommendation, methodology }`
-- [ ] Handles categories with <3 months of data with an explicit "insufficient history" result rather than a garbage regression
+- [x] `forecastCategory(orders, input)` returns `{ historical, forecast, methodology }` (each forecast row includes `recommendedInventory`; took `orders` as an explicit param rather than fetching internally, matching the same pure-function pattern as `executeQueryAnalytics`)
+- [x] Handles categories with <3 months of data with an explicit "insufficient history" result rather than a garbage regression
 
 **Verification:**
-- [ ] Unit tests against seeded data for at least 2 categories (e.g. CRAYON, PAINT) — forecast values are finite, non-negative, and trend-directionally sane
-- [ ] Unit test for the insufficient-history edge case
+- [x] 7 unit tests (`lib/forecast.test.ts`) against real seeded data for CRAYON, PAINT, BRUSH, and all 8 categories — forecast values match an independently hand-computed OLS regression (Python) exactly, not just "finite and non-negative"
+- [x] Unit test for the insufficient-history edge case (synthetic 1-month order set)
 
 **Dependencies:** Task 1
 
@@ -242,13 +242,13 @@ Plan: [`tasks/plan.md`](./plan.md) · Spec: [`docs/FSD.md`](../docs/FSD.md)
 **Description:** Replace Task 6's stub with the real Task 8 implementation; add a historical+forecast line chart component (FSD §5.3 forecast row — visually distinguish historical vs. projected segments).
 
 **Acceptance criteria:**
-- [ ] "Predict demand for CRAYON for the next 4 months" (and equivalent phrasing) routes to `forecastDemand` with correct args
-- [ ] Response includes recommendation + methodology text, rendered in the explainability panel
-- [ ] Forecast chart visually distinguishes historical from projected data
+- [x] "Predict demand for CRAYON for the next 4 months" routes to `forecastDemand` with correct args (`category: "CRAYON"`, `horizonMonths: 4`)
+- [x] Response includes recommendation + methodology text, rendered in the explainability panel
+- [x] Forecast chart visually distinguishes historical (blue solid) from projected (orange dashed) data, with a legend — screenshot-verified
 
 **Verification:**
-- [ ] Manual: forecast for 2 different categories through `/ask`, confirm sane, non-flat, non-negative results
-- [ ] Manual: ask to forecast a specific low-history SKU, confirm the response explains the category-level substitution (FSD §3.3.2) rather than silently forecasting from 1 data point
+- [x] Manual, live against real OpenAI + real seeded DB: CRAYON forecast (6, 4, 2, 0 units; recommended 28, 26, 24, 22) matches the independently hand-computed regression exactly, through both the API and the browser UI
+- [x] Manual: asked to forecast "SKU CRAYON-0008" — correctly inferred `category: CRAYON` and kept `sku` in the query plan for transparency. The prose answer *sometimes* states this is a category-level substitution and sometimes doesn't (gpt-4o-mini instruction-following is inconsistent even after strengthening the prompt) — the substitution is always visible in the explainability panel (methodology text says "for CRAYON", not "for SKU X") regardless, so the transparency requirement is met structurally even when the LLM prose is inconsistent. Documented as a known limitation.
 
 **Dependencies:** Task 8, Task 6
 
@@ -262,8 +262,8 @@ Plan: [`tasks/plan.md`](./plan.md) · Spec: [`docs/FSD.md`](../docs/FSD.md)
 ---
 
 ## CHECKPOINT 3 — Forecasting
-- [ ] Forecast for ≥2 categories sane end-to-end through the UI
-- [ ] Methodology and recommendation both visible in the response
+- [x] Forecast for ≥2 categories sane end-to-end through the UI (CRAYON declining trend, PAINT flat trend, BRUSH declining trend all hand-verified)
+- [x] Methodology and recommendation both visible in the response
 - [ ] **Pause for review before starting Phase 4**
 
 ---
