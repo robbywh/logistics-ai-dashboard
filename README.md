@@ -23,7 +23,6 @@ cp .env.example .env
 | Variable | Required | Notes |
 |---|---|---|
 | `DATABASE_URL` | Yes | Prisma Postgres (Accelerate) connection string, `prisma+postgres://...`. Copy it from the Prisma Console (Database → Connection strings). |
-| `DATABASE_URL_POOLED` | No | On Prisma Compute, Prisma auto-injects this alongside a direct `DATABASE_URL` — the app and seed script prefer it when present (see `lib/prisma.ts`). Not needed locally if `DATABASE_URL` is already an Accelerate URL. |
 | `OPENAI_API_KEY` | Yes (for Ask AI) | The dashboard (`/`) works without it — only `/api/query` depends on it. |
 | `OPENAI_MODEL` | No | Defaults to `gpt-4o-mini`. |
 
