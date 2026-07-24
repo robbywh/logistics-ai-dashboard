@@ -1,9 +1,11 @@
 "use client";
 
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { AnswerCard } from "./AnswerCard";
 import { ExplainabilityPanel } from "./ExplainabilityPanel";
 import { ForecastChart } from "./ForecastChart";
+import { type HistoryEntry, QueryHistoryList } from "./QueryHistoryList";
 import { QueryResultChart } from "./QueryResultChart";
 
 type QueryAnalyticsResponse = {
@@ -46,37 +48,46 @@ const EXAMPLE_QUESTIONS = [
   "Predict demand for CRAYON for the next 4 months",
 ];
 
+async function postQuestion(question: string): Promise<QueryApiResponse> {
+  const res = await fetch("/api/query", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question }),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(typeof data?.error === "string" ? data.error : "Something went wrong.");
+  }
+  return data as QueryApiResponse;
+}
+
 export function AskClient() {
   const [question, setQuestion] = useState("");
-  const [response, setResponse] = useState<QueryApiResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
 
-  async function submit(rawQuestion: string) {
+  const mutation = useMutation({
+    mutationFn: postQuestion,
+    onSuccess: () => {
+      // A newly-logged question changes what /api/query/history returns —
+      // refetch it so the list reflects the write immediately.
+      queryClient.invalidateQueries({ queryKey: ["query-history"] });
+    },
+  });
+
+  function submit(rawQuestion: string) {
     const trimmed = rawQuestion.trim();
     if (!trimmed) return;
-
-    setLoading(true);
-    setError(null);
-    setResponse(null);
-    try {
-      const res = await fetch("/api/query", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: trimmed }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(typeof data?.error === "string" ? data.error : "Something went wrong.");
-        return;
-      }
-      setResponse(data as QueryApiResponse);
-    } catch {
-      setError("Something went wrong. Please try again.");
-    } finally {
-      setLoading(false);
-    }
+    mutation.mutate(trimmed);
   }
+
+  function selectHistoryEntry(entry: HistoryEntry) {
+    setQuestion(entry.question);
+    submit(entry.question);
+  }
+
+  const response = mutation.data ?? null;
+  const error = mutation.error;
+  const loading = mutation.isPending;
 
   return (
     <div className="flex flex-col gap-6">
@@ -126,9 +137,11 @@ export function AskClient() {
         ))}
       </div>
 
+      <QueryHistoryList onSelect={selectHistoryEntry} />
+
       {error && (
         <div className="rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
-          {error}
+          {error instanceof Error ? error.message : "Something went wrong."}
         </div>
       )}
 

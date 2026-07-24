@@ -41,3 +41,16 @@ model Order {
   @@index([productCategory])
   @@index([region])
 }
+
+/// Persisted "Ask AI" question/answer pairs for the recent-questions list.
+/// `response` stores the full OrchestratorResponse JSON so history entries
+/// can be re-displayed instantly without a second AI call.
+model QueryLog {
+  id        String   @id @default(cuid())
+  question  String
+  toolUsed  String
+  response  Json
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}

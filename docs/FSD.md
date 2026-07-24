@@ -53,7 +53,44 @@ The AI layer is a **router**, not a source of truth: it interprets the question,
 
 One denormalized `Order` table mirroring the CSV 1:1 (this **is** the "unified dataset" — no separate lookup tables; simplicity over normalization, matching the assignment's time-box). Indexed on the columns every KPI/tool filters or groups by.
 
+A second table, `QueryLog`, persists each "Ask AI" question/answer pair for the recent-questions feature (§5.2). It has no foreign key to `Order` — it's an application-level log, not part of the analytical dataset, and is the only table the app ever writes to.
+
 > **Prisma 7 note:** this project pins `prisma@7`, which removed the bundled query engine binary in favor of either a driver adapter or Prisma Accelerate. The schema's `generator` block uses `provider = "prisma-client"` with an explicit `output` path (client generates to `generated/prisma`, gitignored, regenerated via `postinstall`), and the app connects through Prisma Accelerate — `new PrismaClient({ accelerateUrl })` via `@prisma/extension-accelerate` (`lib/prisma.ts`) — since the database is Prisma Postgres, not a bare `new PrismaClient()`. Connection URL/migrations config lives in `prisma.config.ts`, not in the `datasource` block (v7 deprecated `url`/`directUrl` there).
+
+#### ERD
+
+```mermaid
+erDiagram
+    Order {
+        string id PK
+        string clientId
+        datetime orderDate
+        datetime deliveryDate "nullable"
+        string carrier
+        string originCity
+        string destinationCity
+        string status "enum OrderStatus"
+        string sku
+        string productCategory
+        int quantity
+        float unitPriceUsd
+        float orderValueUsd
+        boolean isPromo
+        float promoDiscountPct
+        string region
+        string warehouse
+    }
+
+    QueryLog {
+        string id PK
+        string question
+        string toolUsed
+        json response
+        datetime createdAt
+    }
+```
+
+`Order` is read-only (seeded once from the CSV, never mutated by a route). `QueryLog` is written once per `/api/query` call and read by `/api/query/history` — no relation between the two tables; the log stores the AI's full structured response, not a reference back to specific `Order` rows.
 
 ```prisma
 enum OrderStatus {
@@ -89,9 +126,23 @@ model Order {
   @@index([productCategory])
   @@index([region])
 }
+
+/// Persisted "Ask AI" question/answer pairs for the recent-questions list
+/// and for audit/debugging. `response` is not replayed to the UI — clicking
+/// a history entry re-submits the question through POST /api/query for a
+/// fresh, real answer (see §5.2).
+model QueryLog {
+  id        String   @id @default(cuid())
+  question  String
+  toolUsed  String
+  response  Json
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
 ```
 
-Seed script (`prisma/seed.ts`) parses the CSV and upserts all 400 rows. Data is treated as **read-only** by the application — no route ever writes to `Order`.
+Seed script (`prisma/seed.ts`) parses the CSV and upserts all 400 `Order` rows. `Order` is treated as **read-only** by the application — no route ever writes to it. `QueryLog` is the one exception to "read-only": `POST /api/query` writes one row per question (see §5.2, §6).
 
 ### 3.3 Data-driven assumptions (record in README too)
 
@@ -109,13 +160,15 @@ These are forced by what's actually in the CSV, not arbitrary choices:
 ```
 Browser
   │
-  ├─ / (Dashboard)              Server Component → GET /api/dashboard/summary
-  ├─ /ask (Ask AI)              Client Component → POST /api/query
+  ├─ / (Dashboard)              Client Component → React Query → GET /api/dashboard/summary
+  ├─ /ask (Ask AI)              Client Component → React Query → POST /api/query, GET /api/query/history
   │
   ▼
 Next.js App Router (Route Handlers)
   │
   ├─ /api/dashboard/summary  ── deterministic Prisma aggregation (no AI)
+  │
+  ├─ /api/query/history      ── reads recent QueryLog rows (no AI)
   │
   └─ /api/query
         │
@@ -130,12 +183,16 @@ Next.js App Router (Route Handlers)
      grounded answer generation (model restates the computed numbers; never invents figures)
         │
         ▼
-     { answer, explanation, chartSpec, data } → UI
+     { answer, explanation, chartSpec, data } → persisted to QueryLog → UI
                                                       ▼
-                                            Prisma Postgres (read-only)
+                                            Prisma Postgres
+                                              ├─ Order (read-only, Accelerate-cached reads)
+                                              └─ QueryLog (write-once per question, read by history)
 ```
 
-**Why this shape satisfies §5/§9 of the requirements:** the AI never touches the database or emits SQL. It emits a small, typed argument object (zod-validated); an ordinary TypeScript function executes it via Prisma's query builder (`groupBy`/`aggregate`/`count`), never raw/interpolated SQL. The chart type is chosen by a pure function of the DSL shape, not by the model. This keeps "AI interpretation," "data computation," and "business logic" in three separate, independently testable layers per §9.
+**Why this shape satisfies §5/§9 of the requirements:** the AI never touches the database or emits SQL. It emits a small, typed argument object (zod-validated); an ordinary TypeScript function executes it via Prisma's query builder (`groupBy`/`aggregate`/`count`), never raw/interpolated SQL. The chart type is chosen by a pure function of the DSL shape, not by the model. This keeps "AI interpretation," "data computation," and "business logic" in three separate, independently testable layers per §9. Persisting to `QueryLog` happens in the route handler after the orchestrator returns, not inside the orchestrator itself — same separation principle applied to the "log the request" side effect.
+
+**Client-side caching (React Query):** both pages use `@tanstack/react-query` instead of manual `useEffect`/`useState` fetch plumbing. The dashboard's `useQuery` key is `["dashboard-summary", from, to]`, so switching date ranges and back doesn't re-fetch already-seen ranges within the session. Ask AI's history list (`["query-history"]`) is invalidated after every successful `/api/query` mutation, so a newly-asked question appears immediately. This is a session-local complement to the server-side Accelerate cache (§8), not a replacement for it — different tabs/users still share the Accelerate cache; React Query only dedupes within one browser session.
 
 ## 5. Feature Specs
 
@@ -153,7 +210,7 @@ Next.js App Router (Route Handlers)
 2. Delivery performance — on-time vs. delayed/exception, stacked bar or donut.
 3. Carrier breakdown — delay rate by carrier, horizontal bar (also answers requirement §5.1's "which carrier has the highest delay rate" visually).
 
-A date-range control re-fetches `/api/dashboard/summary` with new bounds; all KPIs/charts move together.
+A date-range control re-fetches `/api/dashboard/summary` with new bounds; all KPIs/charts move together. Fetching goes through React Query (`useQuery(["dashboard-summary", from, to], ...)`), so revisiting an already-seen range within the session is instant (cache hit) rather than a new request.
 
 ### 5.2 Ask AI (`/ask`)
 
@@ -161,10 +218,13 @@ Chat-style single-turn form (no multi-turn memory needed for this scope — each
 
 1. `POST /api/query { question }`
 2. Orchestrator selects `queryAnalyticsTool` or `forecastDemandTool`, executes it.
-3. Response renders:
+3. The route persists `{ question, toolUsed, response }` to `QueryLog` (fire-and-logged, but awaited so a write failure is visible in server logs; a logging failure never fails the user-facing response).
+4. Response renders:
    - **Answer** — one/two sentence grounded summary.
    - **Chart** — auto-selected type (line for time series, bar for categorical breakdown, none for a single-number answer).
    - **Explainability panel** (always visible, not a tooltip) — filters used, metric/dimension, resolved date range, the tool name + raw structured args ("query plan"), and a collapsible table of the underlying rows.
+
+**Recent questions.** Below the input, a list of the last 10 `QueryLog` rows (`GET /api/query/history`, newest first) is fetched via React Query. Clicking an entry fills the input and re-submits it through the same `POST /api/query` mutation used for a manually-typed question — a "ask this again" shortcut, not a replay of the stored answer. Caching (Accelerate server-side, React Query client-side) is scoped to the *read* paths only (`/api/dashboard/summary`, `/api/query/history`); the AI call itself always executes for real, so an answer is never served stale. A successful `POST /api/query` invalidates the `["query-history"]` query key, so the list updates immediately after asking a new question — the write and the read-cache invalidation are two explicit steps in the same mutation, not something left implicit.
 
 Covers the three example questions in §4.2 directly:
 - "Show delayed orders by week for the last 3 months" → `queryAnalyticsTool`, `metric: count`, `filter: status in [DELAYED, EXCEPTION]`, `groupBy: week`, date range resolved per 3.3(3).
@@ -236,13 +296,20 @@ Output: historical series, forecast series, per-month recommendation, and a plai
 ```
 
 ### `POST /api/query { question: string }`
-See §5.4 for the response shape. `400` on empty question; `200` with a `clarify` flag when the model can't resolve a tool call; `502` (with a user-safe message) on upstream AI failure — the dashboard itself never depends on this route being up.
+See §5.4 for the response shape. `400` on empty question; `200` with a `clarify` flag when the model can't resolve a tool call; `502` (with a user-safe message) on upstream AI failure — the dashboard itself never depends on this route being up. Persists a `QueryLog` row as a side effect (§5.2); a logging failure is logged server-side but never turns a successful `200` into an error.
+
+### `GET /api/query/history`
+```ts
+{ history: { id: string; question: string; toolUsed: string; response: OrchestratorResponse; createdAt: string }[] }
+```
+Last 10 `QueryLog` rows, newest first. Read-only, no request body.
 
 ## 8. Non-Functional Requirements
 
 - **Performance:** dashboard summary and query-tool executions are single indexed Prisma aggregate queries — sub-second on 400 rows.
-- **Read-only data:** enforced structurally (no mutation route exists), not just by convention.
-- **Deployment:** GitHub → Prisma Compute (already connected) with Prisma Postgres already provisioned on the same platform. Requires `output: "standalone"` in `next.config.ts`. `postinstall` runs `prisma generate`; migrations applied via `prisma migrate deploy` as a documented manual/CI step (not on every build, to avoid surprise schema changes on preview deploys).
+- **Caching:** `getAllOrders()` — the one read path behind both the dashboard and every AI query — goes through Accelerate's edge cache (`cacheStrategy: { ttl: 300, swr: 600 }`), since `Order` only changes via a manual reseed. `QueryLog` reads (`/api/query/history`) are **not** Accelerate-cached — that table changes on every question, and the UI expects a just-asked question to appear immediately; caching it would show stale history until the TTL expired. React Query provides a session-local client cache on top, keyed per query (`["dashboard-summary", from, to]`, `["query-history"]`).
+- **Read-only analytical data:** enforced structurally for `Order` (no mutation route exists), not just by convention. `QueryLog` is the one table the app writes to, and only ever via `POST /api/query`.
+- **Deployment:** GitHub → Prisma Compute (already connected) with Prisma Postgres already provisioned on the same platform. Requires `output: "standalone"` in `next.config.ts`. `postinstall` runs `prisma generate`; migrations applied via `prisma migrate deploy` as a documented manual/CI step (not on every build, to avoid surprise schema changes on preview deploys) — this includes the `QueryLog` migration, which must be deployed to production before `/api/query/history` will work there.
 - **Secrets:** `DATABASE_URL` (Accelerate-backed Prisma Postgres connection string, already present in the Prisma Compute app's env) and `OPENAI_API_KEY` (to be added by the user) — never committed; `.env.example` documents both.
 
 ## 9. Limitations (carried into README)
@@ -254,7 +321,7 @@ See §5.4 for the response shape. `400` on empty question; `200` with a `clarify
 
 ## 10. Future Improvements
 
-- Query history persistence (`QueryLog` table) + a "recent questions" rail — cheap bonus, included as an optional late-phase task.
-- Caching of `/api/dashboard/summary` per date-range.
 - Exponential smoothing as a second forecast method, model picked by whichever has lower in-sample error.
 - Multi-turn chat context for follow-up questions ("...and what about last month?").
+- Cache-tag-based invalidation (`$accelerate.invalidateAll()`) wired into the `db:seed` script, instead of relying on the `Order` cache's `ttl` to expire naturally after a manual reseed.
+- Pagination or "load more" on the query-history list, currently hard-capped at the last 10 questions.

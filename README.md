@@ -61,13 +61,14 @@ No authentication — the dataset is read-only and the assignment's deployment n
 ```
 Browser
   │
-  ├─ / (Dashboard)         Client Component → GET /api/dashboard/summary
-  ├─ /ask (Ask AI)         Client Component → POST /api/query
+  ├─ / (Dashboard)         Client Component → React Query → GET /api/dashboard/summary
+  ├─ /ask (Ask AI)         Client Component → React Query → POST /api/query, GET /api/query/history
   │
   ▼
 Next.js App Router (Route Handlers)
   │
   ├─ /api/dashboard/summary  ── deterministic Prisma fetch + pure aggregation (no AI)
+  ├─ /api/query/history      ── reads recent QueryLog rows (no AI)
   │
   └─ /api/query
         │
@@ -78,9 +79,11 @@ Next.js App Router (Route Handlers)
         │  (plain TypeScript executes the tool — no AI, no SQL from the model)
         │  Call 2: model restates ONLY the numbers in the tool's result
         ▼
-     { answer, explanation, chartType, data } → UI (chart + explainability panel)
+     { answer, explanation, chartType, data } → persisted to QueryLog → UI (chart + explainability panel)
                                                       ▼
-                                            Prisma Postgres (read-only, 400 seeded orders)
+                                            Prisma Postgres
+                                              ├─ Order (read-only, 400 seeded rows, Accelerate-cached reads)
+                                              └─ QueryLog (write-once per question, powers recent-questions list)
 ```
 
 **Key design decisions:**
@@ -90,6 +93,9 @@ Next.js App Router (Route Handlers)
 - **The AI never touches SQL or the database.** It emits a small, zod-validated argument object; a plain TypeScript function executes it via array filtering/grouping. Chart type (`line`/`bar`/`stat`) is chosen by a deterministic pure function of the query shape, never by the model. This is what makes "AI interpretation," "data computation," and "business logic" independently testable, three separate layers rather than one AI call that does everything.
 - **The dashboard has zero AI dependency.** `GET /api/dashboard/summary` never calls OpenAI — it works even if the AI provider is down or the key is missing.
 - **Prisma 7 + Accelerate.** This project pins `prisma@7`, which removed the bundled query engine binary in favor of either a driver adapter or Prisma Accelerate. Since the database is Prisma Postgres (accessed through Accelerate's connection pool), the client is constructed with `accelerateUrl` (`@prisma/extension-accelerate`) rather than a driver adapter — see `lib/prisma.ts`. Connection config lives in `prisma.config.ts`, not the schema's `datasource` block; the generated client (`generated/prisma/`) is gitignored and regenerated via `postinstall`.
+- **Accelerate query caching, scoped to the one read path that's safe to cache.** `getAllOrders()` (`lib/orders.ts`) is the single `findMany()` behind every dashboard request and every AI query — same no-arg call every time, against a dataset that only changes via a manual `db:seed` re-run. The client is wrapped with `withAccelerate()` and that query sets `cacheStrategy: { ttl: 300, swr: 600 }`, so repeat requests hit Accelerate's edge cache instead of the database. One cache entry covers all date ranges, since filtering happens in-memory after the fetch. `QueryLog` reads deliberately do **not** use `cacheStrategy` — that table changes on every question, and an Accelerate cache would show a stale "recent questions" list until the TTL expired (a real bug I hit and fixed while building this: the history list didn't show the question I'd just asked). After a production `Order` reseed, call `prisma.$accelerate.invalidateAll()` (or just wait out the `ttl`) to drop the stale entry.
+- **React Query for client-side state.** Both pages replaced manual `useEffect`/`useState` fetch plumbing with `@tanstack/react-query`. The dashboard keys its query on `["dashboard-summary", from, to]`, so re-selecting a previously-viewed date range in the same session is a cache hit. Ask AI keys history on `["query-history"]` and invalidates it in the `POST /api/query` mutation's `onSuccess`, so a newly-asked question shows up in the list immediately. This is a session-local complement to the Accelerate cache above, not a replacement — it doesn't share state across users/tabs.
+- **Query history persisted, not computed.** `QueryLog` (new Prisma model) stores `{ question, toolUsed, response }` per `/api/query` call, written by the route handler after the orchestrator returns — not inside the orchestrator, keeping "call the AI" and "log the result" as separate steps. `GET /api/query/history` returns the last 10. Clicking an entry in the UI re-submits that question through the normal `POST /api/query` mutation — it's a shortcut for "ask this again," not a replay of the stored answer, so it always reflects a real, current AI response rather than a cached one. Only the *read* endpoints (`/api/dashboard/summary`, `/api/query/history`) are cached (Accelerate server-side, React Query client-side) — the AI call itself is never served from a cache.
 
 ## AI Approach
 
@@ -122,14 +128,14 @@ Next.js App Router (Route Handlers)
 - Chart types are limited to line/bar/stat by design — a deterministic rule, not the model choosing arbitrary visualizations.
 - When a user names a specific SKU to forecast, the model *usually but not always* states in its prose answer that it substituted the category level (a smaller/faster model like `gpt-4o-mini` isn't perfectly consistent about this even with explicit prompting). The substitution itself is never hidden — the query plan and methodology text in the explainability panel always show the actual category used — but the natural-language sentence alone isn't 100% reliable on this point.
 - AI responses take roughly 3–12 seconds (two sequential model calls: routing, then grounded-answer generation). No streaming yet.
-- No query history / recent-questions list (explicitly scoped out — see Future Improvements).
+- Query history is capped at the last 10 questions, no pagination.
 - Underlying-data tables show aggregated rows (the same rows behind each chart/answer — up to ~12), not a raw drill-down into all 400 orders.
 
 ## Future Improvements
 
-- Query history (`QueryLog` table + a "recent questions" list) — scoped out of this submission as the one bonus item, in favor of finishing the core deliverables.
-- Cache `/api/dashboard/summary` per date-range.
 - Exponential smoothing as a second forecasting method, auto-selected by whichever has lower in-sample error.
 - Multi-turn chat context for follow-up questions.
 - Stream the routing/answer generation so the UI can show partial progress instead of one long wait.
 - Move aggregation to DB-side `groupBy` queries if the dataset ever grows past a size where fetch-then-aggregate-in-memory stops being the right tradeoff.
+- Pagination or a "load more" affordance on the query-history list.
+- Cache-tag-based Accelerate invalidation wired into `db:seed`, instead of relying on the `Order` cache's `ttl` to expire naturally after a manual reseed.

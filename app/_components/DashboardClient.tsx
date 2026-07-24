@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { CarrierBreakdownChart } from "./CarrierBreakdownChart";
 import { DateRangeControl } from "./DateRangeControl";
 import { DeliveryPerformanceChart } from "./DeliveryPerformanceChart";
@@ -25,76 +26,47 @@ function formatPercent(value: number): string {
   return `${(value * 100).toFixed(1)}%`;
 }
 
+async function fetchSummary(range: { from: string; to: string } | null): Promise<DashboardSummary> {
+  const params = range ? new URLSearchParams({ from: range.from, to: range.to }) : null;
+  const res = await fetch(`/api/dashboard/summary${params ? `?${params}` : ""}`);
+  if (!res.ok) throw new Error("Failed to load dashboard data.");
+  return res.json();
+}
+
 export function DashboardClient() {
-  const [range, setRange] = useState<{ from: string; to: string } | null>(null);
-  const [summary, setSummary] = useState<DashboardSummary | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // null = "use the dataset's full range" (server-resolved); set once the
+  // user picks a range via DateRangeControl.
+  const [selectedRange, setSelectedRange] = useState<{ from: string; to: string } | null>(null);
 
-  const fetchSummary = useCallback(async (requestedRange: { from: string; to: string }) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams({
-        from: requestedRange.from,
-        to: requestedRange.to,
-      });
-      const res = await fetch(`/api/dashboard/summary?${params.toString()}`);
-      if (!res.ok) throw new Error("Failed to load dashboard data.");
-
-      const data: DashboardSummary = await res.json();
-      setSummary(data);
-      setRange({ from: data.range.from, to: data.range.to });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  // Initial load: fetches the full dataset range. State is only set after
-  // the first `await`, so nothing runs synchronously in the effect body.
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadInitial() {
-      try {
-        const res = await fetch("/api/dashboard/summary");
-        if (!res.ok) throw new Error("Failed to load dashboard data.");
-        const data: DashboardSummary = await res.json();
-        if (cancelled) return;
-        setSummary(data);
-        setRange({ from: data.range.from, to: data.range.to });
-      } catch (err) {
-        if (cancelled) return;
-        setError(err instanceof Error ? err.message : "Something went wrong.");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-
-    loadInitial();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const {
+    data: summary,
+    isLoading,
+    error,
+  } = useQuery({
+    queryKey: ["dashboard-summary", selectedRange?.from, selectedRange?.to],
+    queryFn: () => fetchSummary(selectedRange),
+  });
 
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-2xl font-semibold">Dashboard</h1>
-        {range && (
-          <DateRangeControl from={range.from} to={range.to} onChange={fetchSummary} />
+        {summary && (
+          <DateRangeControl
+            from={summary.range.from}
+            to={summary.range.to}
+            onChange={setSelectedRange}
+          />
         )}
       </div>
 
       {error && (
         <div className="rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
-          {error}
+          {error instanceof Error ? error.message : "Something went wrong."}
         </div>
       )}
 
-      {loading && !summary && !error && (
+      {isLoading && !summary && !error && (
         <p className="text-zinc-500 dark:text-zinc-400">Loading…</p>
       )}
 

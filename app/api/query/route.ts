@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { answerQuestion } from "@/lib/ai/orchestrator";
+import { logQuery } from "@/lib/query-log";
 
 export async function POST(request: Request) {
   let question = "";
@@ -18,6 +19,11 @@ export async function POST(request: Request) {
 
   try {
     const response = await answerQuestion(question);
+    try {
+      await logQuery(question, response);
+    } catch (err) {
+      console.error("Failed to log query:", err);
+    }
     return NextResponse.json(response);
   } catch (error) {
     console.error("AI orchestration failed:", error);
