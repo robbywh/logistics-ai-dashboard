@@ -19,7 +19,7 @@ The AI layer is a **router**, not a source of truth: it interprets the question,
 - Correct, explainable analytics over the provided dataset.
 - NL query → structured tool call → deterministic computation → grounded answer + chart.
 - Basic, honest forecasting (linear trend) with a stated methodology.
-- Deployable as-is to the already-provisioned Vercel + Prisma Postgres project.
+- Deployable as-is to the already-provisioned Prisma Compute + Prisma Postgres project.
 
 **Non-goals (explicitly out of scope, per "do not over-engineer")**
 - Auth / multi-tenant access control (single shared read-only dataset, no login).
@@ -53,7 +53,7 @@ The AI layer is a **router**, not a source of truth: it interprets the question,
 
 One denormalized `Order` table mirroring the CSV 1:1 (this **is** the "unified dataset" — no separate lookup tables; simplicity over normalization, matching the assignment's time-box). Indexed on the columns every KPI/tool filters or groups by.
 
-> **Prisma 7 note:** this project pins `prisma@7`, which removed the bundled query engine binary in favor of driver adapters. The schema's `generator` block uses `provider = "prisma-client"` with an explicit `output` path (client generates to `generated/prisma`, gitignored, regenerated via `postinstall`), and the app connects through `@prisma/adapter-pg` (`lib/prisma.ts`) rather than a bare `new PrismaClient()`. Connection URL/migrations config lives in `prisma.config.ts`, not in the `datasource` block (v7 deprecated `url`/`directUrl` there).
+> **Prisma 7 note:** this project pins `prisma@7`, which removed the bundled query engine binary in favor of either a driver adapter or Prisma Accelerate. The schema's `generator` block uses `provider = "prisma-client"` with an explicit `output` path (client generates to `generated/prisma`, gitignored, regenerated via `postinstall`), and the app connects through Prisma Accelerate — `new PrismaClient({ accelerateUrl })` via `@prisma/extension-accelerate` (`lib/prisma.ts`) — since the database is Prisma Postgres, not a bare `new PrismaClient()`. Connection URL/migrations config lives in `prisma.config.ts`, not in the `datasource` block (v7 deprecated `url`/`directUrl` there).
 
 ```prisma
 enum OrderStatus {
@@ -242,8 +242,8 @@ See §5.4 for the response shape. `400` on empty question; `200` with a `clarify
 
 - **Performance:** dashboard summary and query-tool executions are single indexed Prisma aggregate queries — sub-second on 400 rows.
 - **Read-only data:** enforced structurally (no mutation route exists), not just by convention.
-- **Deployment:** GitHub → Vercel (already connected) with Prisma Postgres already provisioned. `postinstall` runs `prisma generate`; migrations applied via `prisma migrate deploy` as a documented manual/CI step (not on every build, to avoid surprise schema changes on preview deploys).
-- **Secrets:** `DATABASE_URL` (already present in the Vercel project's env) and `OPENAI_API_KEY` (to be added by the user) — never committed; `.env.example` documents both.
+- **Deployment:** GitHub → Prisma Compute (already connected) with Prisma Postgres already provisioned on the same platform. Requires `output: "standalone"` in `next.config.ts`. `postinstall` runs `prisma generate`; migrations applied via `prisma migrate deploy` as a documented manual/CI step (not on every build, to avoid surprise schema changes on preview deploys).
+- **Secrets:** `DATABASE_URL` (Accelerate-backed Prisma Postgres connection string, already present in the Prisma Compute app's env) and `OPENAI_API_KEY` (to be added by the user) — never committed; `.env.example` documents both.
 
 ## 9. Limitations (carried into README)
 

@@ -9,7 +9,7 @@ An AI-powered analytics dashboard for a logistics client: a traditional KPI/char
 ### Requirements
 
 - Node.js 20.19+
-- A Prisma Postgres database (this project already has one provisioned via a GitHub ↔ Prisma Postgres integration)
+- A Prisma Postgres database (this project already has one provisioned via Prisma Compute, connected to this repo's GitHub `main` branch)
 - An OpenAI API key
 
 ### Environment variables
@@ -22,7 +22,7 @@ cp .env.example .env
 
 | Variable | Required | Notes |
 |---|---|---|
-| `DATABASE_URL` | Yes | Prisma Postgres connection string. If the Vercel project is already linked, run `vercel env pull .env` instead of copying by hand. |
+| `DATABASE_URL` | Yes | Prisma Postgres (Accelerate) connection string, `prisma+postgres://...`. Copy it from the Prisma Console (Database → Connection strings). |
 | `OPENAI_API_KEY` | Yes (for Ask AI) | The dashboard (`/`) works without it — only `/api/query` depends on it. |
 | `OPENAI_MODEL` | No | Defaults to `gpt-4o-mini`. |
 
@@ -45,14 +45,14 @@ npm test    # vitest — 22 unit tests over the aggregation, query DSL, date-anc
 
 ### Deployment
 
-Already wired to Vercel + Prisma Postgres via the GitHub integration — pushes to `main` auto-deploy. Two things are **not** automatic and need to be run once against the production database:
+Deployed on [Prisma Compute](https://www.prisma.io/compute), which also hosts the Prisma Postgres database — wired to this repo's GitHub `main` branch, so pushes auto-deploy. `next.config.ts` sets `output: "standalone"`, which Compute requires for Next.js apps. Two things are **not** automatic and need to be run once against the production database:
 
 ```bash
 npm run db:deploy   # npx prisma migrate deploy — applies prisma/migrations to prod
 npm run db:seed      # loads the CSV into prod (needs DATABASE_URL pointed at prod)
 ```
 
-Migrations are deliberately **not** run on every build (no `prisma migrate deploy` in the build command) — for a small project like this, auto-running migrations on preview deploys against a shared production database is a bigger risk than the convenience is worth. Also set `OPENAI_API_KEY` (and optionally `OPENAI_MODEL`) in the Vercel project's environment variables.
+Migrations are deliberately **not** run on every build (no `prisma migrate deploy` in the build command) — for a small project like this, auto-running migrations on preview deploys against a shared production database is a bigger risk than the convenience is worth. Also set `OPENAI_API_KEY` (and optionally `OPENAI_MODEL`) as environment variables on the Prisma Compute app.
 
 No authentication — the dataset is read-only and the assignment's deployment notes treat that as acceptable for a demo.
 
@@ -89,7 +89,7 @@ Next.js App Router (Route Handlers)
 - **Aggregation happens in TypeScript over an in-memory array, not DB-side `groupBy`.** `getAllOrders()` fetches all 400 rows once (`lib/orders.ts`); every metric — dashboard KPIs, the query DSL, and forecasting — is a pure function over that array (`lib/dashboard.ts`, `lib/query-dsl.ts`, `lib/forecast.ts`). This keeps every computation unit-testable against the real seed data with **no database connection required**, at a scale (400 rows) where the performance tradeoff is irrelevant. Would move to DB-side aggregation if the dataset grew significantly.
 - **The AI never touches SQL or the database.** It emits a small, zod-validated argument object; a plain TypeScript function executes it via array filtering/grouping. Chart type (`line`/`bar`/`stat`) is chosen by a deterministic pure function of the query shape, never by the model. This is what makes "AI interpretation," "data computation," and "business logic" independently testable, three separate layers rather than one AI call that does everything.
 - **The dashboard has zero AI dependency.** `GET /api/dashboard/summary` never calls OpenAI — it works even if the AI provider is down or the key is missing.
-- **Prisma 7 + driver adapters.** This project pins `prisma@7`, which removed the bundled query engine binary in favor of driver adapters (`@prisma/adapter-pg`). Connection config lives in `prisma.config.ts`, not the schema's `datasource` block; the generated client (`generated/prisma/`) is gitignored and regenerated via `postinstall`.
+- **Prisma 7 + Accelerate.** This project pins `prisma@7`, which removed the bundled query engine binary in favor of either a driver adapter or Prisma Accelerate. Since the database is Prisma Postgres (accessed through Accelerate's connection pool), the client is constructed with `accelerateUrl` (`@prisma/extension-accelerate`) rather than a driver adapter — see `lib/prisma.ts`. Connection config lives in `prisma.config.ts`, not the schema's `datasource` block; the generated client (`generated/prisma/`) is gitignored and regenerated via `postinstall`.
 
 ## AI Approach
 

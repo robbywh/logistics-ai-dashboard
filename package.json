@@ -15,12 +15,11 @@
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.20",
-    "@prisma/adapter-pg": "^7.9.0",
     "@prisma/client": "^7.9.0",
+    "@prisma/extension-accelerate": "^3.0.1",
     "ai": "^7.0.37",
     "dotenv": "^17.4.2",
     "next": "16.2.11",
-    "pg": "^8.22.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "recharts": "^3.10.0",
@@ -29,7 +28,6 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
-    "@types/pg": "^8.20.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "csv-parse": "^7.0.1",
