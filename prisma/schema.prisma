@@ -1,0 +1,43 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum OrderStatus {
+  DELIVERED
+  DELAYED
+  EXCEPTION
+  IN_TRANSIT
+  CANCELED
+}
+
+model Order {
+  id               String      @id
+  clientId         String
+  orderDate        DateTime
+  deliveryDate     DateTime?
+  carrier          String
+  originCity       String
+  destinationCity  String
+  status           OrderStatus
+  sku              String
+  productCategory  String
+  quantity         Int
+  unitPriceUsd     Float
+  orderValueUsd    Float
+  isPromo          Boolean
+  promoDiscountPct Float
+  region           String
+  warehouse        String
+
+  @@index([orderDate])
+  @@index([status])
+  @@index([carrier])
+  @@index([productCategory])
+  @@index([region])
+}
